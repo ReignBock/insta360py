@@ -11,6 +11,7 @@ output can be diffed against the reference tool. Two things are load-bearing:
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from google.protobuf import json_format
@@ -23,7 +24,7 @@ from ..frames.timestamped_frame import TimestampedFrame
 from ..header import InsvHeader
 from ..metadata import InsvMetadata
 from ..records.exposure import ExposureRecord
-from ..records.gps import GpsRecord, _java_double
+from ..records.gps import GpsRecord
 from ..records.gyro_raw import GyroRawRecord
 from ..records.gyro_v1 import GyroV1Record
 from ..records.gyro_v2 import GyroV2Record
@@ -33,7 +34,32 @@ from ..records.timestamped import TimestampedRecord
 INDENT = "  "
 
 
-class Raw:
+def _number(value: float) -> str:
+    """Render a float for the dump.
+
+    Python's repr is the shortest string that round-trips, which is also what
+    Java's Double.toString aims for, so ordinary values render identically to
+    the reference tool. The two disagree only on where to switch to
+    exponent notation (Java does so beyond 1e7 and below 1e-3); no camera
+    value comes close to either bound.
+    """
+    return repr(float(value))
+
+
+def _gps_description(record: GpsRecord) -> str:
+    """A one-line human-readable summary of a GPS fix."""
+    when = datetime.fromtimestamp(record.timestamp, tz=timezone.utc)
+    return (
+        f"time {when:%Y-%m-%dT%H:%M:%SZ}"
+        f" position {_number(record.latitude)}{record.north_south}"
+        f" {_number(record.longitude)}{record.east_west}"
+        f" speed {_number(record.speed)}"
+        f" track {_number(record.track)}"
+        f" altitude {_number(record.altitude)}"
+    )
+
+
+class Raw:  # pylint: disable=too-few-public-methods
     """A value written verbatim, bypassing JSON encoding."""
 
     __slots__ = ("text",)
@@ -75,15 +101,15 @@ def _record_node(record: TimestampedRecord) -> dict[str, Any]:
 
     if isinstance(record, GpsRecord):
         node["payload"] = _bytes_value(record.payload)
-        node["description"] = record.description
+        node["description"] = _gps_description(record)
     elif isinstance(record, GyroV1Record):
-        node["payload"] = _array_value(record.payload, _java_double)
+        node["payload"] = _array_value(record.payload, _number)
     elif isinstance(record, GyroV2Record):
         node["payload"] = _array_value(record.payload, str)
     elif isinstance(record, GyroRawRecord):
         node["payload"] = _bytes_value(record.payload)
     elif isinstance(record, ExposureRecord):
-        node["shutterSpeed"] = Raw(_java_double(record.shutter_speed))
+        node["shutterSpeed"] = Raw(_number(record.shutter_speed))
     elif not isinstance(record, TimelapseRecord):
         raise TypeError(f"Unsupported record type {type(record).__name__}")
 
@@ -126,7 +152,8 @@ def _metadata_node(metadata: InsvMetadata) -> dict[str, Any]:
     }
 
 
-def _write(value: Any, indent: str) -> str:
+def _write(value: Any, indent: str) -> str:  # pylint: disable=too-many-return-statements
+    """Render one value; the branches are a type dispatch, not logic."""
     if isinstance(value, Raw):
         return value.text
     if value is None:
@@ -136,7 +163,7 @@ def _write(value: Any, indent: str) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
-        return _java_double(value)
+        return _number(value)
     if isinstance(value, str):
         return json.dumps(value)
     if isinstance(value, dict):

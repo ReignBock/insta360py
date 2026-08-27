@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+from dataclasses import dataclass
 from typing import BinaryIO
 
 SIGNATURE = b"8db42d694ccc418790edff439fe026bf"
@@ -12,19 +13,17 @@ HEADER_SIZE = 72
 _HEADER = struct.Struct("<32sii32s")
 
 
+@dataclass
 class InsvHeader:
     """The 72-byte footer at the very end of an .insv file.
 
     Its absence is not an error: a plain MP4 simply has no metadata trailer.
     """
 
-    __slots__ = ("unknown_buf", "version", "metadata_size", "metadata_pos")
-
-    def __init__(self, unknown_buf: bytes, version: int, metadata_size: int, metadata_pos: int):
-        self.unknown_buf = unknown_buf
-        self.version = version
-        self.metadata_size = metadata_size
-        self.metadata_pos = metadata_pos
+    unknown_buf: bytes
+    version: int
+    metadata_size: int
+    metadata_pos: int
 
     @classmethod
     def dummy(cls) -> "InsvHeader":
@@ -52,4 +51,5 @@ class InsvHeader:
         return cls(unknown_buf, version, metadata_size, length - metadata_size)
 
     def write(self, f: BinaryIO, size: int) -> None:
+        """Write the footer, recording the trailer's total size."""
         f.write(_HEADER.pack(self.unknown_buf, size, self.version, SIGNATURE))

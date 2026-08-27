@@ -6,7 +6,7 @@ import struct
 from typing import TYPE_CHECKING, BinaryIO
 
 from .frame import Frame
-from .frame_header import FRAME_HEADER_SIZE, FrameHeader
+from .frame_header import FrameHeader
 
 if TYPE_CHECKING:
     from ..metadata import InsvMetadata

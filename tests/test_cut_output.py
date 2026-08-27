@@ -4,6 +4,10 @@ The bar is higher than "it plays": the trailer must match the Java byte for
 byte, and the container must keep the shape the camera wrote.
 """
 
+# pytest passes fixtures as arguments named after the fixture, which pylint
+# reads as shadowing.
+# pylint: disable=redefined-outer-name
+
 import shutil
 import struct
 import subprocess
@@ -11,7 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from insvtools.cli import run
+import insvtools.commands.cut as cut_module
+from insvtools.cli import main
 from insvtools.frames.frame_type import FrameType
 from insvtools.header import InsvHeader
 from insvtools.metadata import InsvMetadata
@@ -60,8 +65,9 @@ def test_full_range_rewrite_is_byte_identical(sample_insv: Path, tmp_path: Path)
 def test_cut_trailer_matches_java(
     sample_insv: Path, golden: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The cut file's trailer must match the reference exactly."""
     monkeypatch.chdir(sample_insv.parent)
-    assert run("cut", "--end-time=1", "sample.insv") == 0
+    assert main(["cut", "--end-time=1", "sample.insv"]) == 0
 
     produced = (sample_insv.parent / "sample.cut.insv").read_bytes()
     expected = (golden / "sample.cut.insv").read_bytes()
@@ -80,7 +86,7 @@ def test_cut_container_differs_from_java_only_in_timestamps(
     reference, so the difference is pinned here rather than treated as drift.
     """
     monkeypatch.chdir(sample_insv.parent)
-    assert run("cut", "--end-time=1", "sample.insv") == 0
+    assert main(["cut", "--end-time=1", "sample.insv"]) == 0
 
     produced = (sample_insv.parent / "sample.cut.insv").read_bytes()
     expected = (golden / "sample.cut.insv").read_bytes()
@@ -98,7 +104,7 @@ def test_cut_clips_at_the_preceding_keyframe(
 ) -> None:
     """sample.insv's video has sync samples at 0.0000 and 0.5005."""
     monkeypatch.chdir(sample_insv.parent)
-    assert run("cut", "--start-time=0.9", "sample.insv") == 0
+    assert main(["cut", "--start-time=0.9", "sample.insv"]) == 0
 
     cut = sample_insv.parent / "sample.cut.insv"
 
@@ -123,8 +129,9 @@ def test_cut_clips_at_the_preceding_keyframe(
 def test_cut_slices_timelapse_records(
     sample_insv: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Timelapse records follow the video sample range."""
     monkeypatch.chdir(sample_insv.parent)
-    assert run("cut", "--start-time=0.9", "sample.insv") == 0
+    assert main(["cut", "--start-time=0.9", "sample.insv"]) == 0
 
     with (sample_insv.parent / "sample.cut.insv").open("rb") as f:
         metadata = InsvMetadata.read(f)
@@ -148,7 +155,7 @@ def test_text_track_survives_unchanged(
 ) -> None:
     """The QuickTime `text` track keeps its sample entry and sample count."""
     monkeypatch.chdir(sample_insv.parent)
-    assert run("cut", "--end-time=1", "sample.insv") == 0
+    assert main(["cut", "--end-time=1", "sample.insv"]) == 0
 
     with (sample_insv.parent / "sample.cut.insv").open("rb") as f:
         header = InsvHeader.read(f)
@@ -165,13 +172,15 @@ def test_text_track_survives_unchanged(
 def test_cut_output_decodes_cleanly(
     sample_insv: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """ffmpeg must decode the result without complaint."""
     monkeypatch.chdir(sample_insv.parent)
-    assert run("cut", "--start-time=0.9", "sample.insv") == 0
+    assert main(["cut", "--start-time=0.9", "sample.insv"]) == 0
 
     result = subprocess.run(
         ["ffmpeg", "-v", "error", "-i", "sample.cut.insv", "-f", "null", "-"],
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert result.returncode == 0
@@ -181,9 +190,10 @@ def test_cut_output_decodes_cleanly(
 def test_cut_refuses_to_overwrite(
     sample_insv: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """An existing output file is never clobbered."""
     monkeypatch.chdir(sample_insv.parent)
-    assert run("cut", "--end-time=1", "sample.insv") == 0
-    assert run("cut", "--end-time=1", "sample.insv") != 0
+    assert main(["cut", "--end-time=1", "sample.insv"]) == 0
+    assert main(["cut", "--end-time=1", "sample.insv"]) != 0
 
 
 def test_partial_output_is_removed_on_failure(
@@ -192,12 +202,10 @@ def test_partial_output_is_removed_on_failure(
     """A failure mid-write must not leave a truncated file behind."""
     monkeypatch.chdir(sample_insv.parent)
 
-    import insvtools.commands.cut as cut_module
-
     def boom(*args, **kwargs):
         raise RuntimeError("simulated write failure")
 
     monkeypatch.setattr(cut_module, "write_clipped", boom)
 
-    assert run("cut", "--end-time=1", "sample.insv") != 0
+    assert main(["cut", "--end-time=1", "sample.insv"]) != 0
     assert not (sample_insv.parent / "sample.cut.insv").exists()

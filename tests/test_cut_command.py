@@ -1,65 +1,67 @@
-"""Port of CutCommandTest.java.
+"""Output naming and file grouping, ported from CutCommandTest.java."""
 
-These cases pin down output naming and file grouping, both of which are pure
-string logic upstream, so they transfer verbatim.
-"""
+# pytest passes fixtures as arguments named after the fixture, which pylint
+# reads as shadowing.
+# pylint: disable=redefined-outer-name
 
 from pathlib import Path
 
-from insvtools.commands.cut import CutCommand
+from insvtools.commands.cut import cut_file_for, files_to_process
 
 
-def _cut_command(file_name: str, cut_file_name: str | None) -> CutCommand:
-    return CutCommand(file_name, cut_file_name, 0, 0, 0, False)
-
-
-def _files_to_process(main_file: str, *files_list: str) -> dict[Path, Path]:
-    command = CutCommand(main_file, None, 0, 0, 0, True)
-    command.list_files = lambda accept: [Path(f) for f in files_list if accept(Path(f))]
-    return command.files_to_process()
+def _names(main_file: str, *listing: str, out_file: str | None = None) -> set[str]:
+    return {
+        p.name
+        for p in files_to_process(
+            Path(main_file), out_file, True, [Path(f) for f in listing]
+        )
+    }
 
 
 def test_cut_file_for_without_out_file() -> None:
-    cmd = _cut_command("VID_20231203_220002_00_117.insv", None)
+    """Default naming adds a .cut infix."""
+    main = Path("VID_20231203_220002_00_117.insv")
 
-    assert cmd.cut_file_for(Path("LRV_20231203_220002_00_117.insv")).name == \
-        "LRV_20231203_220002_00_117.cut.insv"
-    assert cmd.cut_file_for(Path("VID_20231203_220002_00_117.insv")).name == \
-        "VID_20231203_220002_00_117.cut.insv"
-    assert cmd.cut_file_for(Path("VID_20231203_220002_10_117.insv")).name == \
-        "VID_20231203_220002_10_117.cut.insv"
-    assert cmd.cut_file_for(Path("VID_20231203_220002_10_117.mp4")).name == \
-        "VID_20231203_220002_10_117.cut.mp4"
-    assert cmd.cut_file_for(Path("LRV_20231203_220002_10_117.lrv")).name == \
-        "LRV_20231203_220002_10_117.cut.lrv"
+    for source, expected in [
+        ("LRV_20231203_220002_00_117.insv", "LRV_20231203_220002_00_117.cut.insv"),
+        ("VID_20231203_220002_00_117.insv", "VID_20231203_220002_00_117.cut.insv"),
+        ("VID_20231203_220002_10_117.insv", "VID_20231203_220002_10_117.cut.insv"),
+        ("VID_20231203_220002_10_117.mp4", "VID_20231203_220002_10_117.cut.mp4"),
+        ("LRV_20231203_220002_10_117.lrv", "LRV_20231203_220002_10_117.cut.lrv"),
+    ]:
+        assert cut_file_for(main, None, Path(source)).name == expected
 
 
 def test_cut_file_for_with_out_file_matching_main_name() -> None:
-    cmd = _cut_command("VID_20231203_220002_00_117.insv", "CUT_VID_20231203_220002_00_117.CUT")
+    """Siblings substitute their own stem."""
+    main = Path("VID_20231203_220002_00_117.insv")
+    out = "CUT_VID_20231203_220002_00_117.CUT"
 
-    assert cmd.cut_file_for(Path("LRV_20231203_220002_00_117.insv")).name == \
-        "CUT_LRV_20231203_220002_00_117.CUT"
-    assert cmd.cut_file_for(Path("VID_20231203_220002_00_117.insv")).name == \
-        "CUT_VID_20231203_220002_00_117.CUT"
-    assert cmd.cut_file_for(Path("VID_20231203_220002_10_117.insv")).name == \
-        "CUT_VID_20231203_220002_10_117.CUT"
-    assert cmd.cut_file_for(Path("VID_20231203_220002_10_117.mp4")).name == \
-        "CUT_VID_20231203_220002_10_117.CUT"
+    for source, expected in [
+        ("LRV_20231203_220002_00_117.insv", "CUT_LRV_20231203_220002_00_117.CUT"),
+        ("VID_20231203_220002_00_117.insv", "CUT_VID_20231203_220002_00_117.CUT"),
+        ("VID_20231203_220002_10_117.insv", "CUT_VID_20231203_220002_10_117.CUT"),
+        ("VID_20231203_220002_10_117.mp4", "CUT_VID_20231203_220002_10_117.CUT"),
+    ]:
+        assert cut_file_for(main, out, Path(source)).name == expected
 
 
 def test_cut_file_for_with_out_file_not_matching_main_name() -> None:
-    cmd = _cut_command("VID_20231203_220002_00_117.insv", "cut_file.insv")
+    """Only the main file takes the given name."""
+    main = Path("VID_20231203_220002_00_117.insv")
+    out = "cut_file.insv"
 
-    assert cmd.cut_file_for(Path("LRV_20231203_220002_00_117.insv")).name == \
-        "LRV_20231203_220002_00_117.cut.insv"
-    assert cmd.cut_file_for(Path("VID_20231203_220002_00_117.insv")).name == "cut_file.insv"
-    assert cmd.cut_file_for(Path("VID_20231203_220002_10_117.insv")).name == \
-        "VID_20231203_220002_10_117.cut.insv"
-    assert cmd.cut_file_for(Path("VID_20231203_220002_10_117.mp4")).name == \
-        "VID_20231203_220002_10_117.cut.mp4"
+    for source, expected in [
+        ("LRV_20231203_220002_00_117.insv", "LRV_20231203_220002_00_117.cut.insv"),
+        ("VID_20231203_220002_00_117.insv", "cut_file.insv"),
+        ("VID_20231203_220002_10_117.insv", "VID_20231203_220002_10_117.cut.insv"),
+        ("VID_20231203_220002_10_117.mp4", "VID_20231203_220002_10_117.cut.mp4"),
+    ]:
+        assert cut_file_for(main, out, Path(source)).name == expected
 
 
-def test_files_to_process_groups_siblings() -> None:
+def test_groups_siblings_of_the_same_recording() -> None:
+    """Grouping keys on prefix, timestamp and trailing number."""
     listing = (
         "VID_20231203_220002_00_117.insv",
         "VID_20231203_220002_01_117.insv",
@@ -75,11 +77,11 @@ def test_files_to_process_groups_siblings() -> None:
     }
 
     for main in ("VID_20231203_220002_00_117.insv", "VID_20231203_220002_01_117.insv"):
-        found = {p.name for p in _files_to_process(main, *listing)}
-        assert found == expected
+        assert _names(main, *listing) == expected
 
 
-def test_files_to_process_treats_insv_and_lrv_as_interchangeable() -> None:
+def test_insv_and_lrv_are_interchangeable() -> None:
+    """.insv and .lrv match each other."""
     listing = (
         "VID_20240414_135511_00_027.insv",
         "VID_20240414_135511_00_028.insv",
@@ -89,25 +91,29 @@ def test_files_to_process_treats_insv_and_lrv_as_interchangeable() -> None:
     expected = {"VID_20240414_135511_00_027.insv", "LRV_20240414_135511_01_027.lrv"}
 
     for main in ("VID_20240414_135511_00_027.insv", "LRV_20240414_135511_01_027.lrv"):
-        found = {p.name for p in _files_to_process(main, *listing)}
-        assert found == expected
+        assert _names(main, *listing) == expected
 
 
-def test_files_to_process_honours_prefix_and_extension() -> None:
-    found = {
-        p.name
-        for p in _files_to_process(
-            "PRO_VID_20221010_115706_00_002.mp4",
-            "PRO_VID_20221010_115706_00_002.mp4",
-            "PRO_LRV_20221010_115706_01_002.mp4",
-            "PRO_LRV_20221010_115706_01_002.insv",
-            "PRO_VID_20221010_115706_00_003.mp4",
-            "VID_20221010_115706_00_002.mp4",
-            "LRV_20221010_115706_01_002.mp4",
-        )
-    }
-
-    assert found == {
+def test_prefix_and_extension_are_honoured() -> None:
+    """A prefix and extension both narrow the group."""
+    assert _names(
+        "PRO_VID_20221010_115706_00_002.mp4",
         "PRO_VID_20221010_115706_00_002.mp4",
         "PRO_LRV_20221010_115706_01_002.mp4",
+        "PRO_LRV_20221010_115706_01_002.insv",
+        "PRO_VID_20221010_115706_00_003.mp4",
+        "VID_20221010_115706_00_002.mp4",
+        "LRV_20221010_115706_01_002.mp4",
+    ) == {
+        "PRO_VID_20221010_115706_00_002.mp4",
+        "PRO_LRV_20221010_115706_01_002.mp4",
+    }
+
+
+def test_grouping_disabled_processes_one_file() -> None:
+    """--no-group processes only the named file."""
+    main = Path("VID_20231203_220002_00_117.insv")
+
+    assert files_to_process(main, None, group=False) == {
+        main: Path("VID_20231203_220002_00_117.cut.insv")
     }

@@ -1,179 +1,137 @@
-"""Port of org.insvtools.InsvTools - the command line entry point.
-
-The argument contract is upstream's, not argparse's: the file name is always
-last, parameters are strictly ``--key=value`` (never space separated), and an
-unrecognised parameter is an error rather than something to ignore.
-"""
+"""Command line entry point."""
 
 from __future__ import annotations
 
+import argparse
+import logging
 import re
 import sys
+from importlib.metadata import PackageNotFoundError, version
+from typing import Sequence
 
-from .logger import get_logger
+from .commands import cut as cut_commands
+from .commands import meta
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 _TIME_PATTERN = re.compile(r"((\d+):)?((\d+)(\.\d+)?)")
-
-USAGE = """InsvTools v.{version}
-Toolkit for working with Insta360 cameras video files
-Usage (jar):    java -jar insvtools.jar <cmd> [parameters] <filename>
-Usage (native): insvtools <cmd> [parameters] <filename>
-Available commands and parameters:
-    cut                             - cut the file using start time and/or end time
-        [--start-time=<time>]       - start time in format [MM:]SS[.SSS]
-        [--end-time=<time>]         - end time in format [MM:]SS[.SSS]
-        [--timestamp-scale=<scale>] - Gyro records timestamp scale (autodetect by default)
-        [--group=<true/false>]      - process the whole group of files related to specified file (true by default)
-        [--out-file=<filename>]     - use specified output file (by default 'cut' suffix will be added to the original file name)
-
-    dump-meta                       - dump insv file metadata
-        [--frame-type=<frame-type>] - dump only specified integer frame type (by default all frames will be dumped)
-        [--dump-file=<filename>]    - dump file name (by default 'meta.json' suffix will be added to the original file name)
-
-    decompose-meta                  - store insv file metadata to file-per-frame
-        [--frame-type=<frame-type>] - store only specified integer frame type (by default all frames will be stored)
-
-    compose-meta                    - compose file-per-frame metadata to the insv file
-
-    remove-meta                     - remove insv file metadata
-
-    extract-meta                    - extract insv file metadata as one file
-        [--meta-file=<filename>]    - metadata file name (by default 'meta' suffix will be added to the original file name)
-
-    replace-meta                    - replace insv file metadata with another from file
-        [--meta-file=<filename>]    - metadata file name (by default 'meta' suffix will be added to the original file name)"""
 
 
 def _version() -> str:
     try:
-        from importlib.metadata import version
-
         return version("insta360py")
-    except Exception:
+    except PackageNotFoundError:
         return "unknown"
 
 
-def parse_time(time: str | None) -> float:
+def parse_time(text: str) -> float:
     """Parse ``[MM:]SS[.SSS]`` into seconds."""
-    if time is None:
-        return 0.0
-
-    matcher = _TIME_PATTERN.fullmatch(time)
+    matcher = _TIME_PATTERN.fullmatch(text)
 
     if matcher is None:
-        raise ValueError(f"Can't parse time {time}")
+        raise argparse.ArgumentTypeError(f"Can't parse time {text!r}, expected [MM:]SS[.SSS]")
 
-    minutes = matcher.group(2)
-    seconds = matcher.group(3)
+    minutes, seconds = matcher.group(2), matcher.group(3)
 
     return (0.0 if minutes is None else int(minutes) * 60.0) + float(seconds)
 
 
-def _build_command(cmd_name: str, file_name: str, parameters: dict[str, str]):
-    if cmd_name == "dump-meta":
-        from .commands.meta_dump import MetaDumpCommand
+def build_parser() -> argparse.ArgumentParser:
+    """Build the full argument parser, one subparser per command."""
+    parser = argparse.ArgumentParser(
+        prog="insvtools",
+        description="Toolkit for working with Insta360 camera video files",
+    )
+    parser.add_argument("--version", action="version", version=f"insvtools {_version()}")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="log what is happening in detail"
+    )
+    parser.add_argument("-q", "--quiet", action="store_true", help="only report problems")
 
-        frame_type = parameters.pop("--frame-type", None)
-        dump_file_name = parameters.pop("--dump-file", None)
-        return MetaDumpCommand(file_name, 0 if frame_type is None else int(frame_type), dump_file_name)
+    commands = parser.add_subparsers(dest="command", required=True, metavar="<command>")
 
-    if cmd_name == "decompose-meta":
-        from .commands.meta_decompose import MetaDecomposeCommand
+    def command(name: str, help_text: str, handler) -> argparse.ArgumentParser:
+        sub = commands.add_parser(name, help=help_text, description=help_text)
+        sub.set_defaults(handler=handler)
+        sub.add_argument("file_name", metavar="FILE", help="input .insv file")
+        return sub
 
-        frame_type = parameters.pop("--frame-type", None)
-        return MetaDecomposeCommand(file_name, 0 if frame_type is None else int(frame_type))
+    cut = command("cut", "cut the file using start and/or end time", cut_commands.cut)
+    # Defaults stay None so an explicit --start-time=0 differs from omitting it.
+    cut.add_argument("--start-time", type=parse_time, metavar="TIME",
+                     help="start time, as [MM:]SS[.SSS]")
+    cut.add_argument("--end-time", type=parse_time, metavar="TIME",
+                     help="end time, as [MM:]SS[.SSS]")
+    cut.add_argument("--timestamp-scale", type=int, metavar="N",
+                     help="gyro timestamp scale (autodetected by default)")
+    cut.add_argument("--out-file", metavar="PATH",
+                     help="output file (default: a '.cut' suffix on the input name)")
+    cut.add_argument("--no-group", dest="group", action="store_false",
+                     help="process only this file, not the whole recording")
 
-    if cmd_name == "compose-meta":
-        from .commands.meta_compose import MetaComposeCommand
+    dump = command("dump-meta", "dump metadata as JSON", meta.dump_meta)
+    dump.add_argument("--frame-type", type=int, metavar="N",
+                      help="dump only this frame type (default: all)")
+    dump.add_argument("--dump-file", dest="out_file", metavar="PATH",
+                      help="output file (default: a '.meta.json' suffix on the input name)")
 
-        return MetaComposeCommand(file_name)
+    decompose = command("decompose-meta", "write one file per metadata frame",
+                        meta.decompose_meta)
+    decompose.add_argument("--frame-type", type=int, metavar="N",
+                           help="store only this frame type (default: all)")
 
-    if cmd_name == "remove-meta":
-        from .commands.meta_remove import MetaRemoveCommand
+    command("compose-meta", "rebuild a trailer from per-frame files", meta.compose_meta)
+    command("remove-meta", "strip the metadata trailer", meta.remove_meta)
 
-        return MetaRemoveCommand(file_name)
+    extract = command("extract-meta", "copy the metadata trailer to its own file",
+                      meta.extract_meta)
+    extract.add_argument("--meta-file", metavar="PATH",
+                         help="output file (default: a '.meta' suffix on the input name)")
 
-    if cmd_name == "extract-meta":
-        from .commands.meta_extract import MetaExtractCommand
+    replace = command("replace-meta", "replace the metadata trailer from a file",
+                      meta.replace_meta)
+    replace.add_argument("--meta-file", metavar="PATH",
+                         help="input file (default: a '.meta' suffix on the input name)")
 
-        return MetaExtractCommand(file_name, parameters.pop("--meta-file", None))
-
-    if cmd_name == "replace-meta":
-        from .commands.meta_replace import MetaReplaceCommand
-
-        return MetaReplaceCommand(file_name, parameters.pop("--meta-file", None))
-
-    if cmd_name == "cut":
-        from .commands.cut import CutCommand
-
-        start_time = parameters.pop("--start-time", None)
-        end_time = parameters.pop("--end-time", None)
-        group_flag = parameters.pop("--group", None)
-        cut_file_name = parameters.pop("--out-file", None)
-        timestamp_scale = parameters.pop("--timestamp-scale", None)
-
-        group_of_files = group_flag is None or group_flag.lower() == "true"
-        scale = 0 if timestamp_scale is None else int(timestamp_scale)
-
-        if start_time is None and end_time is None:
-            raise ValueError(
-                "At least one parameter (--start-time or --end-time) should be specified"
-            )
-
-        return CutCommand(
-            file_name,
-            cut_file_name,
-            parse_time(start_time),
-            parse_time(end_time),
-            scale,
-            group_of_files,
-        )
-
-    return None
+    return parser
 
 
-def run(*args: str) -> int:
-    version = _version()
+def _configure_logging(verbose: bool, quiet: bool) -> None:
+    """Send progress to stderr, so stdout stays free for real output."""
+    level = logging.DEBUG if verbose else logging.WARNING if quiet else logging.INFO
+    logging.basicConfig(level=level, format="%(message)s", stream=sys.stderr, force=True)
 
-    if len(args) < 2:
-        print(USAGE.format(version=version))
-        return 0
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run one command. Returns the process exit code."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    _configure_logging(args.verbose, args.quiet)
+
+    handler = args.handler
+    options = {
+        key: value
+        for key, value in vars(args).items()
+        if key not in {"command", "handler", "verbose", "quiet"} and value is not None
+    }
+
+    if handler is cut_commands.cut and "start_time" not in options and "end_time" not in options:
+        parser.error("cut needs --start-time and/or --end-time")
 
     try:
-        cmd_name = args[0]
-        file_name = args[-1]
-        parameters: dict[str, str] = {}
+        handler(**options)
+    # Any failure from here is a user-facing error, not a crash: the CLI
+    # reports it and exits non-zero.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # The traceback is only interesting with -v; the message is what the
+        # user needs.
+        logger.debug("Command failed", exc_info=e)
+        print(f"insvtools: error: {e}", file=sys.stderr)
+        return 1
 
-        for arg in args[1:-1]:
-            if "=" in arg:
-                key, _, value = arg.partition("=")
-                parameters[key] = value
-            else:
-                raise ValueError(
-                    f"Can't parse parameter: '{arg}', expected format: --parameter=value"
-                )
-
-        cmd = _build_command(cmd_name, file_name, parameters)
-
-        if cmd is None:
-            raise ValueError(f"Unknown command {cmd_name}")
-
-        if parameters:
-            raise ValueError(f"Unknown parameter(s): {set(parameters)}")
-
-        logger.debug("Command line arguments: " + " ".join(args))
-        logger.info(f"InsvTools v.{version}, start processing '{cmd_name}' command")
-        cmd.run()
-        logger.info("Processed successfully")
-
-        return 0
-    except Exception as e:  # noqa: BLE001 - upstream reports every failure the same way
-        logger.error(f"Failure: {e}", e)
-
-        return -1
+    return 0
 
 
-def main() -> None:
-    sys.exit(run(*sys.argv[1:]))
+if __name__ == "__main__":
+    sys.exit(main())

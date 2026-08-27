@@ -5,6 +5,10 @@ payload and the populated case against a synthetic one. Marked clearly:
 the layout is inferred and needs a file with real markers to confirm.
 """
 
+# pytest passes fixtures as arguments named after the fixture, which pylint
+# reads as shadowing.
+# pylint: disable=redefined-outer-name
+
 import struct
 from pathlib import Path
 
@@ -16,6 +20,7 @@ from insvtools.metadata import InsvMetadata
 
 
 def test_sample_anchors_frame_is_seven_empty_sections(sample_insv: Path) -> None:
+    """The only sample available has markers for no section at all."""
     with sample_insv.open("rb") as f:
         metadata = InsvMetadata.read(f)
 
@@ -31,6 +36,7 @@ def test_sample_anchors_frame_is_seven_empty_sections(sample_insv: Path) -> None
 
 
 def test_populated_section() -> None:
+    """A section with markers yields their timestamps."""
     payload = (
         struct.pack("<BI", 1, 2)
         + struct.pack("<II", 310_000_000, 0)

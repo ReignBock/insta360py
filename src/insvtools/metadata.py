@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from typing import BinaryIO
 
+from .frames import factory
 from .frames.frame import Frame
 from .frames.frame_header import FRAME_HEADER_SIZE, FrameHeader
 from .frames.frame_type import FrameType
@@ -40,7 +42,7 @@ class InsvMetadata:
         while cur_pos > header.metadata_pos:
             f.seek(cur_pos)
             frame_header = FrameHeader.read(f)
-            frame = Frame.read(f, frame_header)
+            frame = factory.read(f, frame_header)
             frames.append(frame)
 
             if frame_header.frame_type is FrameType.INDEX:
@@ -56,7 +58,7 @@ class InsvMetadata:
             last_frame = frames[-1]
             if last_frame.header.frame_pos > header.metadata_pos:
                 frames.append(
-                    Frame.read_raw(f, header.metadata_pos, last_frame.header.frame_pos)
+                    factory.read_raw(f, header.metadata_pos, last_frame.header.frame_pos)
                 )
 
         # Frames were read last-to-first, so put them back in file order.
@@ -72,7 +74,7 @@ class InsvMetadata:
         so that writing the trailer back reproduces it byte for byte.
         """
         frames = [
-            Frame.read(f, frame_header)
+            factory.read(f, frame_header)
             for frame_header in index_frame.frames_index
             if frame_header is not None
         ]
@@ -85,7 +87,7 @@ class InsvMetadata:
             frame_end_pos = frame.header.frame_pos + frame.header.frame_size + FRAME_HEADER_SIZE
 
             if frame_end_pos < prev_pos:
-                result.append(Frame.read_raw(f, frame_end_pos, prev_pos))
+                result.append(factory.read_raw(f, frame_end_pos, prev_pos))
 
             result.append(frame)
             prev_pos = frame.header.frame_pos
@@ -107,6 +109,7 @@ class InsvMetadata:
                 frame.parse(self)
 
     def write(self, f: BinaryIO) -> None:
+        """Write every frame followed by the footer."""
         if self.find_frame(FrameType.INDEX) is not None:
             self._write_indexed(f)
             return
@@ -165,3 +168,42 @@ class InsvMetadata:
         return next(
             (f for f in self.frames if f.header.frame_type_code == frame_type), None
         )
+
+
+def read_metadata(path: str | os.PathLike[str]) -> InsvMetadata:
+    """Read a file's metadata, raising if it has none."""
+    metadata = read_metadata_optional(path)
+
+    if metadata is None:
+        raise ValueError("Metadata not found")
+
+    return metadata
+
+
+def read_metadata_optional(path: str | os.PathLike[str]) -> InsvMetadata | None:
+    """Read a file's metadata, or None if it is a plain MP4."""
+    with open(path, "rb") as f:
+        return InsvMetadata.read(f)
+
+
+def replace_metadata(path: str | os.PathLike[str], metadata: InsvMetadata) -> None:
+    """Truncate any existing trailer and append this one."""
+    with open(path, "r+b") as f:
+        header = InsvHeader.read(f)
+
+        if header is not None:
+            f.truncate(header.metadata_pos)
+
+        f.seek(0, 2)
+        metadata.write(f)
+
+
+def strip_metadata(path: str | os.PathLike[str]) -> None:
+    """Remove the trailer, leaving a plain MP4."""
+    with open(path, "r+b") as f:
+        header = InsvHeader.read(f)
+
+        if header is None:
+            raise ValueError("Metadata not found")
+
+        f.truncate(header.metadata_pos)

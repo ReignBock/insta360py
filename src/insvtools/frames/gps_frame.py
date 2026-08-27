@@ -7,6 +7,8 @@ from .timestamped_frame import TimestampedFrame
 
 
 class GpsFrame(TimestampedFrame):
+    """GPS fixes over time."""
+
     def _record_size(self) -> int:
         return GpsRecord.SIZE
 

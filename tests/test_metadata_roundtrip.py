@@ -5,6 +5,10 @@ backwards frame walk, RAW gap preservation, and the index-frame path in one
 shot. If it passes, unknown frames survive a round trip untouched.
 """
 
+# pytest passes fixtures as arguments named after the fixture, which pylint
+# reads as shadowing.
+# pylint: disable=redefined-outer-name
+
 from pathlib import Path
 
 from insvtools.frames.frame_type import FrameType
@@ -13,6 +17,7 @@ from insvtools.metadata import InsvMetadata
 
 
 def test_roundtrip_is_byte_identical(sample_insv: Path, tmp_path: Path) -> None:
+    """Read the trailer, write it back, expect the same bytes."""
     out = tmp_path / "roundtrip.insv"
 
     with sample_insv.open("rb") as f:
@@ -73,6 +78,7 @@ def test_roundtrip_after_parse_drops_only_the_partial_gyro_record(
 
 
 def test_header_fields(sample_insv: Path) -> None:
+    """The footer reports where the trailer starts."""
     with sample_insv.open("rb") as f:
         header = InsvHeader.read(f)
 

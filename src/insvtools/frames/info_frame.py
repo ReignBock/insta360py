@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, BinaryIO
 
-from ..extra_metadata_pb2 import ExtraMetadata
+# protobuf 7.x builds message classes at runtime via _builder, so no static
+# analyser can see this name; pylint-protobuf does not resolve it either.
+from ..extra_metadata_pb2 import ExtraMetadata  # pylint: disable=no-name-in-module
 from ..records.gyro_raw import GyroRawRecord
 from .frame import Frame
 
@@ -44,31 +46,16 @@ class InfoFrame(Frame):
         f.write(body)
         return len(body) + self.header.write(f, len(body))
 
-    def _require_parsed(self) -> ExtraMetadata:
-        if not self.parsed or self.extra_metadata is None:
-            raise RuntimeError("Metadata is not parsed")
-        return self.extra_metadata
-
     @property
     def gyro_timestamp(self) -> int:
+        """The timestamp of the sample gyro record, or -1 if there is none."""
         return -1 if self.gyro_record is None else self.gyro_record.timestamp
 
     @gyro_timestamp.setter
     def gyro_timestamp(self, timestamp: int) -> None:
-        if self.gyro_record is None:
+        # Setting this has to re-encode the blob it was read from.
+        if self.gyro_record is None or self.extra_metadata is None:
             return
-        extra = self._require_parsed()
+
         self.gyro_record.timestamp = timestamp
-        extra.Gyro = self.gyro_record.to_bytes()
-
-    def set_file_size(self, file_size: int) -> None:
-        self._require_parsed().FileSize = file_size
-
-    def set_first_frame_timestamp(self, timestamp: int) -> None:
-        self._require_parsed().FirstFrameTimestamp = timestamp
-
-    def set_total_time(self, total_time: int) -> None:
-        self._require_parsed().TotalTime = total_time
-
-    def set_first_gps_timestamp(self, timestamp: int) -> None:
-        self._require_parsed().FirstGpsTimestamp = timestamp
+        self.extra_metadata.Gyro = self.gyro_record.to_bytes()

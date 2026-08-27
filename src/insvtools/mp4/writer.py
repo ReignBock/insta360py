@@ -9,15 +9,16 @@ follow.
 
 from __future__ import annotations
 
+import logging
 import struct
 from dataclasses import dataclass
+from itertools import groupby
 from typing import BinaryIO
 
-from ..logger import get_logger
 from .boxes import Box, box_bytes
 from .reader import Mp4File, Sample, Track
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 _U32 = struct.Struct(">I")
 _U64 = struct.Struct(">Q")
@@ -48,17 +49,13 @@ class _Chunk:
 
     @property
     def size(self) -> int:
+        """Total bytes of the samples in this chunk."""
         return sum(s.size for s in self.samples)
 
 
 def _run_length(values: list[int]) -> list[tuple[int, int]]:
-    runs: list[tuple[int, int]] = []
-    for value in values:
-        if runs and runs[-1][1] == value:
-            runs[-1] = (runs[-1][0] + 1, value)
-        else:
-            runs.append((1, value))
-    return runs
+    """Collapse equal neighbours into (count, value) pairs, as stts/ctts store them."""
+    return [(sum(1 for _ in group), value) for value, group in groupby(values)]
 
 
 def _stts(samples: list[Sample]) -> bytes:
@@ -183,7 +180,7 @@ def _rebuild_stbl(
 
     for child in stbl.children:
         if child.type in _DROPPED:
-            logger.debug(f"Dropping {child.type.decode('latin1')} box: cannot be clipped")
+            logger.debug("Dropping %s box: cannot be clipped", child.type.decode("latin1"))
             continue
         if child.type == b"sdtp":
             parts.append(_sdtp(child.payload(f), first, last))
@@ -287,11 +284,85 @@ def _mdat_prefix(f: BinaryIO, mp4: Mp4File, mdat: Box) -> bytes:
 
     if not 0 < gap <= _MAX_MDAT_PREFIX:
         if gap > _MAX_MDAT_PREFIX:
-            logger.debug(f"Ignoring {gap} unreferenced bytes at the start of mdat")
+            logger.debug("Ignoring %d unreferenced bytes at the start of mdat", gap)
         return b""
 
     f.seek(mdat.payload_offset)
     return f.read(gap)
+
+
+def _copy_sample(f: BinaryIO, out: BinaryIO, sample: Sample) -> None:
+    """Copy one sample's bytes across, a block at a time."""
+    f.seek(sample.offset)
+    remaining = sample.size
+
+    while remaining > 0:
+        block = f.read(min(remaining, _COPY_CHUNK))
+
+        if not block:
+            raise ValueError("Unexpected end of file while copying samples")
+
+        out.write(block)
+        remaining -= len(block)
+
+
+def _write_mdat(
+    f: BinaryIO,
+    out: BinaryIO,
+    chunks: list[_Chunk],
+    prefix: bytes,
+    mdat_size: int,
+    header_size: int,
+) -> None:
+    """Write the mdat box: header, any leading padding, then the samples."""
+    if header_size == 8:
+        out.write(_U32.pack(mdat_size + 8) + b"mdat")
+    else:
+        out.write(_U32.pack(1) + b"mdat" + _U64.pack(mdat_size + 16))
+
+    out.write(prefix)
+
+    for chunk in chunks:
+        for sample in chunk.samples:
+            _copy_sample(f, out, sample)
+
+
+def _top_level_layout(f: BinaryIO, mp4: Mp4File) -> list[tuple[str, bytes | None]]:
+    """Plan the output's top-level boxes.
+
+    They keep their source order; moov and mdat are the only ones that change,
+    so everything else is captured as raw bytes to pass straight through.
+    """
+    layout: list[tuple[str, bytes | None]] = []
+
+    for box in mp4.boxes:
+        if box.type in (b"moov", b"mdat"):
+            layout.append((box.type.decode("latin1"), None))
+        else:
+            layout.append(("raw", box.raw(f)))
+
+    return layout
+
+
+def _place_chunks(
+    chunks: list[_Chunk],
+    layout: list[tuple[str, bytes | None]],
+    moov_size: int,
+    mdat_leader: int,
+) -> None:
+    """Assign each chunk its offset in the file being written."""
+    offset = 0
+
+    for kind, data in layout:
+        if kind == "mdat":
+            break
+        offset += moov_size if kind == "moov" else len(data or b"")
+
+    running = offset + mdat_leader
+
+    for chunk in chunks:
+        chunk.new_offset = running
+        running += chunk.size
 
 
 def write_clipped(
@@ -315,16 +386,8 @@ def write_clipped(
     mdat_prefix = _mdat_prefix(f, mp4, source_mdat)
     mdat_size = len(mdat_prefix) + sum(chunk.size for chunk in chunks)
 
-    # Top-level boxes keep their source order; moov and mdat are the only ones
-    # that change.
-    layout: list[tuple[str, bytes | None]] = []
-    for box in mp4.boxes:
-        if box.type == b"moov":
-            layout.append(("moov", None))
-        elif box.type == b"mdat":
-            layout.append(("mdat", None))
-        else:
-            layout.append(("raw", box.raw(f)))
+    layout = _top_level_layout(f, mp4)
+    mdat_header_size = 8 if mdat_size + 8 <= 0xFFFFFFFF else 16
 
     # Chunk offsets live inside moov, and moov's size decides where mdat
     # starts, so the two are mutually dependent. Sizes settle after one round;
@@ -332,24 +395,14 @@ def write_clipped(
     moov = _build_moov(f, mp4, clipped, ranges, chunks)
 
     for _ in range(4):
-        mdat_header_size = 8 if mdat_size + 8 <= 0xFFFFFFFF else 16
-
-        offset = 0
-        for kind, data in layout:
-            if kind == "mdat":
-                break
-            offset += len(moov) if kind == "moov" else len(data or b"")
-
-        running = offset + mdat_header_size + len(mdat_prefix)
-        for chunk in chunks:
-            chunk.new_offset = running
-            running += chunk.size
+        _place_chunks(chunks, layout, len(moov), mdat_header_size + len(mdat_prefix))
 
         rebuilt = _build_moov(f, mp4, clipped, ranges, chunks)
-        if len(rebuilt) == len(moov):
-            moov = rebuilt
-            break
+        settled = len(rebuilt) == len(moov)
         moov = rebuilt
+
+        if settled:
+            break
     else:
         raise ValueError("moov size did not converge")
 
@@ -359,20 +412,4 @@ def write_clipped(
         elif kind == "moov":
             out.write(moov)
         else:
-            if mdat_header_size == 8:
-                out.write(_U32.pack(mdat_size + 8) + b"mdat")
-            else:
-                out.write(_U32.pack(1) + b"mdat" + _U64.pack(mdat_size + 16))
-
-            out.write(mdat_prefix)
-
-            for chunk in chunks:
-                for sample in chunk.samples:
-                    f.seek(sample.offset)
-                    remaining = sample.size
-                    while remaining > 0:
-                        block = f.read(min(remaining, _COPY_CHUNK))
-                        if not block:
-                            raise ValueError("Unexpected end of file while copying samples")
-                        out.write(block)
-                        remaining -= len(block)
+            _write_mdat(f, out, chunks, mdat_prefix, mdat_size, mdat_header_size)

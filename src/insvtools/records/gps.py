@@ -1,9 +1,14 @@
-"""Port of org.insvtools.records.GpsRecord."""
+"""GPS fixes.
+
+The payload is kept verbatim and written back unchanged; the decoded fields
+exist so callers don't have to unpack it again.
+"""
 
 from __future__ import annotations
 
 import struct
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from typing import ClassVar
 
 from .timestamped import TS_SIZE, TimestampedRecord
 
@@ -12,63 +17,41 @@ _TS = struct.Struct("<q")
 _BODY = struct.Struct("<3xdcdcddd")
 
 
-def _java_instant(seconds: int) -> str:
-    """Format like java.time.Instant.toString().
+@dataclass
+class GpsRecord(TimestampedRecord):  # pylint: disable=too-many-instance-attributes
+    """A GPS fix: position, speed, track and altitude."""
 
-    Java omits the seconds component when it is zero, so "...T20:15Z" rather
-    than "...T20:15:00Z". The dump output is compared against the Java's, so
-    that quirk has to be reproduced.
-    """
-    dt = datetime.fromtimestamp(seconds, tz=timezone.utc)
-    if dt.second:
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    return dt.strftime("%Y-%m-%dT%H:%MZ")
+    payload: bytes
+    latitude: float
+    north_south: str
+    longitude: float
+    east_west: str
+    speed: float
+    track: float
+    altitude: float
 
-
-def _java_double(value: float) -> str:
-    """Format a float the way Java's Double.toString() would."""
-    if value != value or value in (float("inf"), float("-inf")):
-        return {float("inf"): "Infinity", float("-inf"): "-Infinity"}.get(value, "NaN")
-    text = repr(float(value))
-    if "e" in text or "E" in text:
-        # Python uses e-05 where Java uses E-5.
-        mantissa, _, exponent = text.partition("e")
-        return f"{mantissa}E{int(exponent)}"
-    return text
-
-
-class GpsRecord(TimestampedRecord):
-    """A GPS fix.
-
-    The payload is kept verbatim and written back unchanged; the decoded
-    fields exist only for the human-readable dump.
-    """
-
-    SIZE = TS_SIZE + 45
-
-    __slots__ = ("payload", "description")
-
-    def __init__(self, timestamp: int, payload: bytes, description: str):
-        super().__init__(timestamp)
-        self.payload = payload
-        self.description = description
+    SIZE: ClassVar[int] = TS_SIZE + 45
 
     @classmethod
     def parse(cls, data: bytes, off: int) -> "GpsRecord":
+        """Read a GPS fix at ``off``."""
         (timestamp,) = _TS.unpack_from(data, off)
         payload = data[off + TS_SIZE : off + cls.SIZE]
         latitude, ns, longitude, ew, speed, track, altitude = _BODY.unpack_from(
             data, off + TS_SIZE
         )
-        description = (
-            f"time {_java_instant(timestamp)}"
-            f" position {_java_double(latitude)}{ns.decode('latin1')}"
-            f" {_java_double(longitude)}{ew.decode('latin1')}"
-            f" speed {_java_double(speed)}"
-            f" track {_java_double(track)}"
-            f" altitude {_java_double(altitude)}"
+        return cls(
+            timestamp,
+            payload,
+            latitude,
+            ns.decode("latin1"),
+            longitude,
+            ew.decode("latin1"),
+            speed,
+            track,
+            altitude,
         )
-        return cls(timestamp, payload, description)
 
     def to_bytes(self) -> bytes:
+        """Serialize back to the on-disk form."""
         return _TS.pack(self.timestamp) + self.payload

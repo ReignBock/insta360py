@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass, field
-from typing import BinaryIO, Iterator
+from typing import BinaryIO
 
 # Boxes whose payload is just more boxes.
 CONTAINERS = frozenset(
@@ -44,14 +44,17 @@ class Box:
 
     @property
     def end(self) -> int:
+        """One past the last byte of this box."""
         return self.offset + self.size
 
     @property
     def payload_offset(self) -> int:
+        """Where this box's contents start."""
         return self.offset + self.header_size
 
     @property
     def payload_size(self) -> int:
+        """Size of the contents, excluding the header."""
         return self.size - self.header_size
 
     def find(self, *path: bytes) -> "Box | None":
@@ -64,18 +67,16 @@ class Box:
         return node
 
     def find_all(self, box_type: bytes) -> list["Box"]:
+        """Every direct child of a given type."""
         return [c for c in self.children if c.type == box_type]
 
-    def walk(self) -> Iterator["Box"]:
-        yield self
-        for child in self.children:
-            yield from child.walk()
-
     def payload(self, f: BinaryIO) -> bytes:
+        """Read this box's contents."""
         f.seek(self.payload_offset)
         return f.read(self.payload_size)
 
     def raw(self, f: BinaryIO) -> bytes:
+        """Read this box whole, header included, for copying verbatim."""
         f.seek(self.offset)
         return f.read(self.size)
 
@@ -128,8 +129,3 @@ def box_bytes(box_type: bytes, payload: bytes) -> bytes:
     if size <= 0xFFFFFFFF:
         return _U32.pack(size) + box_type + payload
     return _U32.pack(1) + box_type + _U64.pack(size + 8) + payload
-
-
-def full_box_header(payload: bytes) -> tuple[int, int]:
-    """Return (version, flags) from the first 4 bytes of a FullBox payload."""
-    return payload[0], int.from_bytes(payload[1:4], "big")

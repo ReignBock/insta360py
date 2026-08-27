@@ -1,30 +1,30 @@
-"""Port of org.insvtools.records.GyroV2Record."""
+"""Gyro records, 20-byte form: timestamp plus six int16s."""
 
 from __future__ import annotations
 
 import struct
+from dataclasses import dataclass
+from typing import ClassVar
 
 from .timestamped import TS_SIZE, TimestampedRecord
 
 _REC = struct.Struct("<q6h")
 
 
+@dataclass
 class GyroV2Record(TimestampedRecord):
-    """Timestamp plus six int16s."""
+    """Six int16 gyro values, as written by newer firmware."""
 
-    SIZE = TS_SIZE + 6 * 2
+    payload: tuple[int, ...]
 
-    __slots__ = ("payload",)
-
-    def __init__(self, timestamp: int, payload: tuple[int, ...]):
-        super().__init__(timestamp)
-        self.payload = payload
+    SIZE: ClassVar[int] = TS_SIZE + 6 * 2
 
     @classmethod
     def parse(cls, data: bytes, off: int) -> "GyroV2Record":
+        """Read six int16 values at ``off``."""
         timestamp, *payload = _REC.unpack_from(data, off)
         return cls(timestamp, tuple(payload))
 
     def to_bytes(self) -> bytes:
-        assert len(self.payload) == 6
+        """Serialize back to the on-disk form."""
         return _REC.pack(self.timestamp, *self.payload)

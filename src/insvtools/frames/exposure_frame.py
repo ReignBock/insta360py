@@ -7,6 +7,8 @@ from .timestamped_frame import TimestampedFrame
 
 
 class ExposureFrame(TimestampedFrame):
+    """Shutter speed over time."""
+
     def _record_size(self) -> int:
         return ExposureRecord.SIZE
 
