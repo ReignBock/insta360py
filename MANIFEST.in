@@ -1,0 +1,11 @@
+# The wheel carries only the packages; the sdist is meant to be a complete,
+# testable checkout, so the tests and their fixtures come along with it.
+# setuptools' own default sweeps up tests/test_*.py but not conftest.py, the
+# binary fixtures or the golden outputs, which leaves an sdist whose tests
+# cannot run.
+graft tests
+graft tools
+include CLAUDE.md
+
+global-exclude __pycache__ *.py[cod] .DS_Store
+prune tests/__pycache__

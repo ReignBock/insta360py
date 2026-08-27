@@ -1,0 +1,113 @@
+name: Release
+
+# The version in pyproject.toml is the single source of truth. Run this
+# workflow and it derives the tag from that version, so the release, the tag,
+# the wheel filename and `insvtools --version` cannot disagree.
+#
+# Pushing a v* tag by hand still works, and is checked against pyproject.toml
+# rather than trusted.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish the release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Resolve the version
+        id: version
+        run: |
+          VERSION=$(python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          TAG="v$VERSION"
+
+          # On a tag push the tag is an input, so it has to be checked. A tag
+          # that disagrees with pyproject.toml would produce a wheel whose
+          # filename contradicts the release it hangs off.
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_name }}" != "$TAG" ]; then
+            echo "::error::Tag ${{ github.ref_name }} does not match project version $VERSION (expected $TAG)"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG"
+
+      - name: Refuse to reuse a released version
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" > /dev/null 2>&1; then
+            echo "::error::Release ${{ steps.version.outputs.tag }} already exists - bump the version in pyproject.toml"
+            exit 1
+          fi
+
+      # Optional: the two tests that need it skip cleanly without it.
+      - name: Install ffmpeg (optional)
+        continue-on-error: true
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - run: pip install -e '.[dev]' build twine
+
+      # Never ship something the suite has not passed.
+      - name: Run the full suite
+        run: pytest -q --cov
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check the package metadata
+        run: twine check --strict dist/*
+
+      # The wheel's own filename and recorded version have to agree with the
+      # tag: that is the thing this workflow exists to guarantee.
+      - name: Verify the built artifacts carry the release version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ls dist/
+          test -f "dist/insta360py-$VERSION-py3-none-any.whl" \
+            || { echo "::error::wheel is not version $VERSION"; exit 1; }
+          test -f "dist/insta360py-$VERSION.tar.gz" \
+            || { echo "::error::sdist is not version $VERSION"; exit 1; }
+
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/pip install "dist/insta360py-$VERSION-py3-none-any.whl"
+          /tmp/wheel-check/bin/insv-markers --help > /dev/null
+          REPORTED=$(/tmp/wheel-check/bin/insvtools --version | awk '{print $NF}')
+          echo "insvtools --version reports $REPORTED"
+          test "$REPORTED" = "$VERSION" \
+            || { echo "::error::installed package reports $REPORTED, expected $VERSION"; exit 1; }
+
+      # Tagged only once everything above has passed, so a failed release
+      # never leaves a tag behind. A tag pushed with GITHUB_TOKEN does not
+      # start another workflow run, so this cannot recurse.
+      - name: Tag the release commit
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          gh release view "$TAG" > /dev/null 2>&1 \
+            || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/* --clobber
