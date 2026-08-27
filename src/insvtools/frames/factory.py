@@ -29,8 +29,14 @@ _BY_TYPE: dict[FrameType, type[Frame]] = {
 
 
 def create(header: FrameHeader, payload: bytes) -> Frame:
-    """Build the frame class for a header, or a plain Frame if we have none."""
-    return _BY_TYPE.get(header.frame_type, Frame)(header, payload)
+    """Build the frame class for a header, or a plain Frame if we have none.
+
+    An unknown type code gives a ``frame_type`` of None, which lands on the
+    same plain Frame as a known type we have no special class for.
+    """
+    frame_type = header.frame_type
+    cls = Frame if frame_type is None else _BY_TYPE.get(frame_type, Frame)
+    return cls(header, payload)
 
 
 def read(f: BinaryIO, header: FrameHeader) -> Frame:

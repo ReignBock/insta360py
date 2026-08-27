@@ -7,7 +7,8 @@ import re
 from pathlib import Path
 from typing import Iterable, NamedTuple
 
-from ..frames.frame_type import FrameType
+from ..frames.info_frame import InfoFrame
+from ..frames.timelapse_frame import TimelapseFrame
 from ..header import InsvHeader
 from ..metadata import InsvMetadata, read_metadata_optional
 from ..mp4.reader import Mp4File, Track
@@ -194,9 +195,11 @@ def _update_metadata(
     video: VideoRange,
     timestamp_scale: int,
 ) -> None:
-    info = metadata.find_frame(FrameType.INFO)
+    info = metadata.find_frame_of(InfoFrame)
 
-    if info is None:
+    # extra_metadata stays None for an INFO frame that did not parse (a JSON
+    # frame, or a protobuf we could not read); there is nothing to patch then.
+    if info is None or info.extra_metadata is None:
         return
 
     extra = info.extra_metadata
@@ -214,7 +217,7 @@ def _update_metadata(
     # FirstGpsTimestamp is always in millis, whatever scale the rest uses.
     extra.FirstGpsTimestamp += int(start_time * 1000)
 
-    timelapse = metadata.find_frame(FrameType.TIMELAPSE)
+    timelapse = metadata.find_frame_of(TimelapseFrame)
 
     # Timelapse holds one record per video sample, so dropping samples means
     # dropping the matching records.

@@ -8,7 +8,7 @@ from ..records.gyro_raw import GyroRawRecord
 from ..records.gyro_v1 import GyroV1Record
 from ..records.gyro_v2 import GyroV2Record
 from ..records.timestamped import TimestampedRecord
-from .frame_type import FrameType
+from .info_frame import InfoFrame
 from .timestamped_frame import TimestampedFrame
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ class GyroFrame(TimestampedFrame):
         return self.record_size
 
     def _parse_internal(self, metadata: "InsvMetadata") -> bool:
-        info = metadata.find_frame(FrameType.INFO)
+        info = metadata.find_frame_of(InfoFrame)
 
         if info is None or not info.parsed or info.extra_metadata is None:
             return False

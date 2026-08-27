@@ -26,6 +26,7 @@ def test_sample_anchors_frame_is_seven_empty_sections(sample_insv: Path) -> None
 
     assert metadata is not None
     anchors = metadata.find_frame(FrameType.ANCHORS)
+    assert anchors is not None
     assert len(anchors.payload) == 35
 
     sections = parse_anchors(anchors.payload)
@@ -61,8 +62,10 @@ def test_anchors_frame_stays_opaque_in_the_write_path(sample_insv: Path) -> None
     """Nothing in read/write depends on this inferred layout."""
     with sample_insv.open("rb") as f:
         metadata = InsvMetadata.read(f)
+        assert metadata is not None
         metadata.parse()
 
     anchors = metadata.find_frame(FrameType.ANCHORS)
+    assert anchors is not None
     assert type(anchors).__name__ == "Frame"
     assert not anchors.parsed

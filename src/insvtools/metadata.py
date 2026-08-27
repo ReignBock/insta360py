@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import os
-from typing import BinaryIO
+from typing import BinaryIO, TypeVar
 
 from .frames import factory
 from .frames.frame import Frame
 from .frames.frame_header import FRAME_HEADER_SIZE, FrameHeader
 from .frames.frame_type import FrameType
 from .frames.index_frame import IndexFrame
+from .frames.info_frame import InfoFrame
 from .header import HEADER_SIZE, InsvHeader
+
+_F = TypeVar("_F", bound=Frame)
 
 
 class InsvMetadata:
@@ -45,7 +48,7 @@ class InsvMetadata:
             frame = factory.read(f, frame_header)
             frames.append(frame)
 
-            if frame_header.frame_type is FrameType.INDEX:
+            if isinstance(frame, IndexFrame):
                 # An index frame ends the walk: everything below it is located
                 # by offset instead.
                 frame.parse(metadata)
@@ -99,7 +102,7 @@ class InsvMetadata:
 
         INFO goes first: the gyro frame needs its record size from there.
         """
-        info_frame = self.find_frame(FrameType.INFO)
+        info_frame = self.find_frame_of(InfoFrame)
 
         if info_frame is not None:
             info_frame.parse(self)
@@ -110,7 +113,7 @@ class InsvMetadata:
 
     def write(self, f: BinaryIO) -> None:
         """Write every frame followed by the footer."""
-        if self.find_frame(FrameType.INDEX) is not None:
+        if self.find_frame_of(IndexFrame) is not None:
             self._write_indexed(f)
             return
 
@@ -133,7 +136,7 @@ class InsvMetadata:
         for frame in self.frames:
             header = frame.header
 
-            if header.frame_type is FrameType.INDEX:
+            if isinstance(frame, IndexFrame):
                 index_frame = frame
                 continue
 
@@ -168,6 +171,18 @@ class InsvMetadata:
         return next(
             (f for f in self.frames if f.header.frame_type_code == frame_type), None
         )
+
+    def find_frame_of(self, frame_class: type[_F]) -> _F | None:
+        """Find the first frame of a class, keeping that class in the type.
+
+        :meth:`find_frame` can only promise the base Frame, so callers that
+        want a subclass's fields had to assume the mapping in
+        :mod:`insvtools.frames.factory` held. Searching by class states it
+        instead. Only frame types the factory maps to a class can be found
+        this way; everything else stays a plain Frame and needs
+        :meth:`find_frame`.
+        """
+        return next((f for f in self.frames if isinstance(f, frame_class)), None)
 
 
 def read_metadata(path: str | os.PathLike[str]) -> InsvMetadata:

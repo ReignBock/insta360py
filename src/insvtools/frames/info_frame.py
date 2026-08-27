@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, BinaryIO
 
-# protobuf 7.x builds message classes at runtime via _builder, so no static
-# analyser can see this name; pylint-protobuf does not resolve it either.
+# protobuf 7.x builds message classes at runtime via _builder, so the name is
+# absent from the generated .py. pyright resolves it through the generated
+# extra_metadata_pb2.pyi stub; astroid does not read stubs, hence the disable.
 from ..extra_metadata_pb2 import ExtraMetadata  # pylint: disable=no-name-in-module
 from ..records.gyro_raw import GyroRawRecord
 from .frame import Frame

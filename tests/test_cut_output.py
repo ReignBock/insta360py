@@ -17,7 +17,8 @@ import pytest
 
 import insvtools.commands.cut as cut_module
 from insvtools.cli import main
-from insvtools.frames.frame_type import FrameType
+from insvtools.frames.info_frame import InfoFrame
+from insvtools.frames.timelapse_frame import TimelapseFrame
 from insvtools.header import InsvHeader
 from insvtools.metadata import InsvMetadata
 from insvtools.mp4.reader import Mp4File
@@ -138,8 +139,10 @@ def test_cut_slices_timelapse_records(
         assert metadata is not None
         metadata.parse()
 
-    timelapse = metadata.find_frame(FrameType.TIMELAPSE)
-    info = metadata.find_frame(FrameType.INFO)
+    timelapse = metadata.find_frame_of(TimelapseFrame)
+    info = metadata.find_frame_of(InfoFrame)
+    assert timelapse is not None
+    assert info is not None and info.extra_metadata is not None
 
     # One record per remaining video sample.
     assert len(timelapse.records) == 15
@@ -159,9 +162,11 @@ def test_text_track_survives_unchanged(
 
     with (sample_insv.parent / "sample.cut.insv").open("rb") as f:
         header = InsvHeader.read(f)
+        assert header is not None
         mp4 = Mp4File.read(f, header.metadata_pos)
         text = next(t for t in mp4.tracks if t.handler == "text")
         stsd = text.box.find(b"mdia", b"minf", b"stbl", b"stsd")
+        assert stsd is not None
         entry_type = stsd.payload(f)[12:16]
 
     assert len(text.samples) == 11

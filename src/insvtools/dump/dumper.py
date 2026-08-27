@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from google.protobuf import json_format
+from google.protobuf.message import Message
 
 from ..frames.frame import Frame
 from ..frames.gyro_frame import GyroFrame
@@ -117,9 +118,9 @@ def _record_node(record: TimestampedRecord) -> dict[str, Any]:
     return node
 
 
-def _extra_metadata_node(frame: InfoFrame) -> Raw:
+def _extra_metadata_node(extra_metadata: Message) -> Raw:
     """The protobuf message, indented by 8 spaces on every line."""
-    text = json_format.MessageToJson(frame.extra_metadata, indent=2)
+    text = json_format.MessageToJson(extra_metadata, indent=2)
     indented = "\n".join(" " * 8 + line for line in text.splitlines())
     return Raw("\n" + indented)
 
@@ -133,7 +134,7 @@ def _frame_node(frame: Frame) -> dict[str, Any]:
         ]
     elif isinstance(frame, InfoFrame):
         if frame.extra_metadata is not None:
-            node["extraMetadata"] = _extra_metadata_node(frame)
+            node["extraMetadata"] = _extra_metadata_node(frame.extra_metadata)
         if frame.gyro_record is not None:
             node["gyroRecord"] = _record_node(frame.gyro_record)
     elif isinstance(frame, TimestampedFrame):
