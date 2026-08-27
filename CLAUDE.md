@@ -85,9 +85,13 @@ and unmetered because the repository is public):
   installs the wheel into a clean venv, runs the console scripts, then
   unpacks the sdist and runs *its* tests. That last step is what keeps
   MANIFEST.in honest.
-- **`release.yml`** on a `v*` tag: verifies the tag matches
-  `project.version`, runs the suite, builds, checks the wheel runs, and
-  attaches the sdist and wheel to a GitHub release.
+- **`release.yml`**, run from the Actions tab: `project.version` is the
+  single source of truth, and the tag is derived from it, so the release, the
+  tag, the wheel filename and `insvtools --version` cannot disagree. It runs
+  the suite, builds, asserts the artifacts and the installed package all
+  carry that version, and only then tags the commit and publishes - a failed
+  release leaves no tag behind. Pushing a `v*` tag by hand also works and is
+  checked against `project.version` rather than trusted.
 
 **Releases go to GitHub, not PyPI** - that is a deliberate choice, not an
 oversight. GitHub has no Python package registry, so release assets are the

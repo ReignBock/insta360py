@@ -150,15 +150,17 @@ full test suite runs, fixtures and golden outputs included.
 
 ### Cutting a release
 
-Bump `version` in `pyproject.toml`, then tag it:
+`version` in `pyproject.toml` is the only place a version is written down.
+Bump it, push, then run the **Release** workflow from the Actions tab.
 
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-```
+It derives the tag from that version, so the release, the git tag, the wheel
+filename and what `insvtools --version` reports cannot drift apart. It runs
+the full suite, builds both artifacts, checks the installed wheel reports the
+expected version, and only then tags the commit and publishes the release -
+so a failed release leaves no tag behind.
 
-The release workflow refuses a tag that disagrees with `pyproject.toml`,
-runs the full suite, builds both artifacts, checks the wheel actually runs,
-and attaches everything to a GitHub release it creates for the tag.
+Pushing a `v*` tag by hand still works, and is checked against
+`pyproject.toml` rather than trusted.
 
 ## Development
 
