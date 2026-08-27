@@ -34,6 +34,28 @@ def x5_insv(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def session_dir(tmp_path: Path) -> Path:
+    """A directory of one two-chapter X5 session, both chapters marked.
+
+    Both copies carry the same three markers; the second is a stand-in for a
+    later chapter, so the session's markers are the union of the two.
+    """
+    for chapter in ("029", "030"):
+        shutil.copy(
+            RESOURCES / "x5_indexed.insv",
+            tmp_path / f"VID_20260620_173803_00_{chapter}.insv",
+        )
+    return tmp_path
+
+
+@pytest.fixture
+def unmarked_session(tmp_path: Path) -> Path:
+    """A session whose ANCHORS frame holds nothing - the ONE R sample."""
+    shutil.copy(RESOURCES / "sample.insv", tmp_path / "VID_20221218_231825_00_677.insv")
+    return tmp_path
+
+
+@pytest.fixture
 def golden() -> Path:
     """The reference outputs, or skip if they have not been generated."""
     if not (GOLDEN / "PROVENANCE").exists():
