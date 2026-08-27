@@ -46,6 +46,35 @@ Three gates, all currently clean, all expected to stay that way:
 `ffmpeg` is available (used only by tests); there is no `exiftool`, no Java
 and no Maven.
 
+### Packaging
+
+```bash
+.venv/bin/python -m build        # pure-Python wheel + sdist, no compile step
+```
+
+`protobuf` is the only runtime dependency and the shipped code spawns no
+external process, so an install needs nothing outside pip. ffmpeg is used by
+two tests, and Docker only by `tools/refgen.sh`.
+
+Points worth not undoing:
+
+- **`py.typed` in both packages.** Without that marker (PEP 561) a consumer's
+  type checker ignores our annotations *and* the `extra_metadata_pb2.pyi`
+  stub, however carefully either is maintained.
+- **`package-data` lists `*.pyi` explicitly** rather than relying on
+  setuptools' implicit stub handling.
+- **`MANIFEST.in` grafts `tests/` and `tools/`.** setuptools' default sdist
+  picks up `tests/test_*.py` but *not* `conftest.py`, the binary fixtures or
+  the golden outputs — an sdist whose tests cannot run. Verify with: unpack
+  the sdist, install it, run pytest.
+- **`license` is an SPDX string with `license-files`** (PEP 639). The
+  TOML-table form is deprecated and setuptools removes it in Feb 2027; this
+  is why the build requires `setuptools>=77`.
+
+The build prints `no previously-included files matching '__pycache__' ...`
+warnings. Those are setuptools' own default exclusions matching nothing, not
+a problem with `MANIFEST.in`.
+
 ### Regenerating committed artifacts
 
 | Command | Produces | Needs |

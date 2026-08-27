@@ -113,6 +113,23 @@ The X5 stores its trailer differently from earlier cameras — wrapped in an
 MP4 box, indexed rather than chained, with undocumented frame types — and
 files it produces cannot be read by the original Java tool at all.
 
+## Building a package
+
+```bash
+.venv/bin/pip install build
+.venv/bin/python -m build          # -> dist/*.whl and dist/*.tar.gz
+```
+
+That is the whole story: a pure-Python wheel, no compile step, no platform
+tag. Install the result anywhere with `pip install dist/*.whl`.
+
+`protobuf` is the only runtime dependency, and it comes from pip. **Nothing
+here shells out to an external program** — no ffmpeg, no exiftool, no bundled
+binary — so an installed package needs nothing beyond Python and pip.
+
+The sdist is a complete checkout: unpack it, `pip install .[dev]`, and the
+full test suite runs, fixtures and golden outputs included.
+
 ## Development
 
 ```bash

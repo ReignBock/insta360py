@@ -1,17 +1,38 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "insta360py"
 version = "0.1.0"
-description = "Python implementation of insvtools and Insv-Marker-Extractor"
+description = "Read, cut and extract markers from Insta360 .insv/.lrv footage"
 readme = "README.md"
-license = { file = "LICENSE" }
+# SPDX expression per PEP 639; the TOML-table form is deprecated. The vendored
+# extra_metadata.proto and the code generated from it stay Apache-2.0, which
+# the NOTICE-style credit in the README records.
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
+authors = [{ name = "ReignBock" }]
+keywords = ["insta360", "insv", "mp4", "metadata", "video", "markers"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
 dependencies = [
     "protobuf>=4.25",         # INFO frame (type 1) parse/serialize + dump-meta JSON
 ]
+
+[project.urls]
+Homepage = "https://github.com/ReignBock/insta360py"
+Source = "https://github.com/ReignBock/insta360py"
+Issues = "https://github.com/ReignBock/insta360py/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -31,7 +52,11 @@ insv-markers = "insvmarkers.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-insvtools = ["*.proto"]
+# py.typed marks both packages as typed (PEP 561); without it a consumer's
+# type checker ignores the annotations and the generated .pyi stub entirely.
+# The .pyi is listed rather than left to setuptools' implicit stub handling.
+insvtools = ["*.proto", "*.pyi", "py.typed"]
+insvmarkers = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
