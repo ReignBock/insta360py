@@ -10,7 +10,10 @@
 # only reason pyright (and Pylance) can resolve it and its fields. Re-run this
 # whenever extra_metadata.proto changes, and commit both files together.
 #
-# Uses grpcio-tools from the dev extra, so no Docker and no protoc on PATH.
+# Uses grpcio-tools, so no Docker and no protoc on PATH. Install it with
+#   pip install -e '.[proto]'
+# It is kept out of the dev extra: the bindings are committed, so a normal
+# change never needs this large a download.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

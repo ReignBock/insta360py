@@ -80,7 +80,7 @@ a problem with `MANIFEST.in`.
 Two workflows in `.github/workflows/`, both on GitHub-hosted runners (free
 and unmetered because the repository is public):
 
-- **`ci.yml`** on every push and PR: the suite on Python 3.10-3.13, pylint
+- **`ci.yml`** on every push and PR: the suite on Python 3.12 and 3.13, pylint
   and pyright once on 3.13, and a packaging job that builds both artifacts,
   installs the wheel into a clean venv, runs the console scripts, then
   unpacks the sdist and runs *its* tests. That last step is what keeps
@@ -95,16 +95,18 @@ distribution channel; `pip install` works against a release URL or a tag.
 (The name `insta360py` was free on PyPI as of the last check, if that ever
 changes.)
 
-CI installs ffmpeg and then **fails if the ffmpeg tests skipped**. Both
-guard against a regression they would otherwise hide: the coverage gate
-passes without them, so a runner that quietly lost ffmpeg would drop the two
-checks that prove cut output actually decodes, and nothing would say so.
+CI installs ffmpeg, but treats it as optional: the install step is
+`continue-on-error` and a run without it still passes. Two tests need it -
+the only ones that prove cut output actually decodes - and they skip
+cleanly, with the coverage gate still met. Because a silent skip would
+otherwise look identical to a green run, the job writes a note to the step
+summary saying whether those checks ran.
 
 ### Regenerating committed artifacts
 
 | Command | Produces | Needs |
 |---|---|---|
-| `tools/genproto.sh` | `extra_metadata_pb2.py` + `.pyi` | the `dev` extra |
+| `tools/genproto.sh` | `extra_metadata_pb2.py` + `.pyi` | the `proto` extra |
 | `tools/refgen.sh` | `tests/golden/*` from the Java | Docker + a sibling `insvtools` clone |
 | `tools/mkfixture.py` | `tests/resources/x5_indexed.insv` | a private X5 recording |
 

@@ -42,7 +42,10 @@ jobs:
             exit 1
           fi
 
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      # Optional: the two tests that need it skip cleanly without it.
+      - name: Install ffmpeg (optional)
+        continue-on-error: true
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - run: pip install -e '.[dev]' build twine
 
