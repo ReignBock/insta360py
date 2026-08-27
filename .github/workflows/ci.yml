@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    # Tags are covered by the release workflow, which runs the same suite.
+    tags-ignore: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A newer push to the same branch makes an in-flight run redundant.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Two tests decode cut output to prove the container is really valid.
+      # They skip without ffmpeg, and the coverage gate still passes - which
+      # is exactly why it has to be installed rather than left to chance.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - run: pip install -e '.[dev]'
+
+      # Fails under 100% coverage; see fail_under in pyproject.toml. -rs
+      # reports skip reasons so the check below can see them.
+      - name: Run tests
+        run: pytest -q --cov -rs | tee result.txt
+
+      # A silently skipped test is a check that stopped running without
+      # anyone noticing, which is worse than one that fails.
+      - name: Confirm the ffmpeg tests were not skipped
+        run: |
+          if grep -q "ffmpeg not installed\|ffmpeg not available" result.txt; then
+            echo "::error::ffmpeg tests skipped - the container checks did not run"
+            exit 1
+          fi
+
+  lint:
+    name: Lint and type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - run: pip install -e '.[dev]'
+
+      - name: pylint
+        run: pylint src tests tools
+
+      # pyright is a Node program; the runner already has Node, so the pip
+      # package finds it instead of downloading one.
+      - name: pyright
+        run: pyright
+
+  package:
+    name: Build and verify the distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - run: pip install build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      # Not because we upload to an index, but because it catches a README
+      # that will not render and metadata that will not parse.
+      - name: Check the package metadata
+        run: twine check --strict dist/*
+
+      # A wheel that imports but cannot run is not much use, and the console
+      # scripts are the whole interface.
+      - name: Install the wheel into a clean environment and run it
+        run: |
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/pip install dist/*.whl
+          /tmp/wheel-check/bin/insvtools --version
+          /tmp/wheel-check/bin/insv-markers --help > /dev/null
+
+      # setuptools' default sdist omits conftest.py and the fixtures, which
+      # leaves the tests unrunnable. MANIFEST.in fixes that, and this is what
+      # keeps it fixed.
+      - name: Run the test suite from the unpacked sdist
+        run: |
+          mkdir -p /tmp/sdist && tar xzf dist/*.tar.gz -C /tmp/sdist --strip-components=1
+          python -m venv /tmp/sdist-check
+          /tmp/sdist-check/bin/pip install pytest pytest-cov /tmp/sdist
+          cd /tmp/sdist && /tmp/sdist-check/bin/python -m pytest -q
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution
+          path: dist/

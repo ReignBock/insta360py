@@ -75,6 +75,31 @@ The build prints `no previously-included files matching '__pycache__' ...`
 warnings. Those are setuptools' own default exclusions matching nothing, not
 a problem with `MANIFEST.in`.
 
+### CI and releases
+
+Two workflows in `.github/workflows/`, both on GitHub-hosted runners (free
+and unmetered because the repository is public):
+
+- **`ci.yml`** on every push and PR: the suite on Python 3.10-3.13, pylint
+  and pyright once on 3.13, and a packaging job that builds both artifacts,
+  installs the wheel into a clean venv, runs the console scripts, then
+  unpacks the sdist and runs *its* tests. That last step is what keeps
+  MANIFEST.in honest.
+- **`release.yml`** on a `v*` tag: verifies the tag matches
+  `project.version`, runs the suite, builds, checks the wheel runs, and
+  attaches the sdist and wheel to a GitHub release.
+
+**Releases go to GitHub, not PyPI** - that is a deliberate choice, not an
+oversight. GitHub has no Python package registry, so release assets are the
+distribution channel; `pip install` works against a release URL or a tag.
+(The name `insta360py` was free on PyPI as of the last check, if that ever
+changes.)
+
+CI installs ffmpeg and then **fails if the ffmpeg tests skipped**. Both
+guard against a regression they would otherwise hide: the coverage gate
+passes without them, so a runner that quietly lost ffmpeg would drop the two
+checks that prove cut output actually decodes, and nothing would say so.
+
 ### Regenerating committed artifacts
 
 | Command | Produces | Needs |

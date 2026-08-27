@@ -1,5 +1,7 @@
 # insta360py
 
+[![CI](https://github.com/ReignBock/insta360py/actions/workflows/ci.yml/badge.svg)](https://github.com/ReignBock/insta360py/actions/workflows/ci.yml)
+
 Python tools for Insta360 footage: read and edit the metadata Insta360
 cameras append to `.insv`/`.lrv` files, cut clips without re-encoding, and
 pull the timeline markers you pressed while recording back out again.
@@ -26,12 +28,28 @@ frame types nobody has documented.
 
 ## Install
 
+Grab a wheel from the [latest release](https://github.com/ReignBock/insta360py/releases/latest):
+
+```bash
+pip install insta360py-0.1.0-py3-none-any.whl
+```
+
+Or install straight from a tag:
+
+```bash
+pip install "git+https://github.com/ReignBock/insta360py@v0.1.0"
+```
+
+Or from a checkout:
+
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install .
 ```
 
-This gives you two commands, `insvtools` and `insv-markers`.
+Any of these gives you two commands, `insvtools` and `insv-markers`.
+
+This is not on PyPI.
 
 ## Markers
 
@@ -129,6 +147,18 @@ binary — so an installed package needs nothing beyond Python and pip.
 
 The sdist is a complete checkout: unpack it, `pip install .[dev]`, and the
 full test suite runs, fixtures and golden outputs included.
+
+### Cutting a release
+
+Bump `version` in `pyproject.toml`, then tag it:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The release workflow refuses a tag that disagrees with `pyproject.toml`,
+runs the full suite, builds both artifacts, checks the wheel actually runs,
+and attaches everything to a GitHub release it creates for the tag.
 
 ## Development
 
