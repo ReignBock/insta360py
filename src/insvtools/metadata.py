@@ -11,7 +11,7 @@ from .frames.frame_header import FRAME_HEADER_SIZE, FrameHeader
 from .frames.frame_type import FrameType
 from .frames.index_frame import IndexFrame
 from .frames.info_frame import InfoFrame
-from .header import HEADER_SIZE, InsvHeader
+from .header import HEADER_SIZE, INST_BOX_HEADER_SIZE, InsvHeader, write_inst_box_header
 
 _F = TypeVar("_F", bound=Frame)
 
@@ -123,21 +123,28 @@ class InsvMetadata:
 
     def _write_indexed(self, f: BinaryIO) -> None:
         """Write frames, then rebuild the index frame to match where they landed."""
+        index_frame = self.find_frame_of(IndexFrame)
+        assert index_frame is not None
+
+        # The index is one slot per frame type, so its length has to cover
+        # every type we know of and every type actually present. It also may
+        # not shrink: cameras size the index by their own highest type, which
+        # can exceed both (an X5 writes 31 slots for a highest type of 29), and
+        # rewriting a shorter index would change the file's shape.
         max_type = max(
             max(frame_type.value for frame_type in FrameType),
             max(frame.header.frame_type_code for frame in self.frames),
+            len(index_frame.frames_index) - 1,
         )
         headers: list[FrameHeader | None] = [None] * (max_type + 1)
 
-        index_frame: IndexFrame | None = None
         size = 0
         metadata_pos = f.tell()
 
         for frame in self.frames:
             header = frame.header
 
-            if isinstance(frame, IndexFrame):
-                index_frame = frame
+            if frame is index_frame:
                 continue
 
             pos = f.tell()
@@ -154,8 +161,6 @@ class InsvMetadata:
                 frame_size - FRAME_HEADER_SIZE,
                 pos - metadata_pos,
             )
-
-        assert index_frame is not None
 
         index_frame.frames_index[:] = headers
         size += index_frame.write(f)
@@ -201,16 +206,37 @@ def read_metadata_optional(path: str | os.PathLike[str]) -> InsvMetadata | None:
         return InsvMetadata.read(f)
 
 
+def write_trailer(f: BinaryIO, metadata: InsvMetadata, boxed: bool) -> None:
+    """Write a trailer, wrapped in an ``inst`` box if the file uses one.
+
+    The box's size covers the trailer, which is only known once it has been
+    written, so the header goes down as a placeholder and is patched after.
+    """
+    if not boxed:
+        metadata.write(f)
+        return
+
+    start = f.tell()
+    f.write(bytes(INST_BOX_HEADER_SIZE))
+    metadata.write(f)
+    end = f.tell()
+
+    f.seek(start)
+    write_inst_box_header(f, end - start - INST_BOX_HEADER_SIZE)
+    f.seek(end)
+
+
 def replace_metadata(path: str | os.PathLike[str], metadata: InsvMetadata) -> None:
     """Truncate any existing trailer and append this one."""
     with open(path, "r+b") as f:
         header = InsvHeader.read(f)
+        boxed = header is not None and header.boxed
 
         if header is not None:
-            f.truncate(header.metadata_pos)
+            f.truncate(header.container_end)
 
         f.seek(0, 2)
-        metadata.write(f)
+        write_trailer(f, metadata, boxed)
 
 
 def strip_metadata(path: str | os.PathLike[str]) -> None:
@@ -221,4 +247,4 @@ def strip_metadata(path: str | os.PathLike[str]) -> None:
         if header is None:
             raise ValueError("Metadata not found")
 
-        f.truncate(header.metadata_pos)
+        f.truncate(header.container_end)

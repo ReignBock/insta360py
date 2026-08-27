@@ -4,22 +4,27 @@ Not part of the upstream Java, which leaves type 10 as an opaque payload. This
 exists for the Insv-Marker-Extractor port, which currently gets markers by
 running `decompose-meta --frame-type=10` and re-reading the bytes off disk.
 
-**The layout here is inferred, not confirmed.** The PowerShell reads the
-payload as a single ``uint32`` count at offset 1 followed by 8-byte records.
-sample.insv's 35-byte payload does not fit that: it decodes cleanly as seven
-5-byte section headers (``uint8 kind, uint32 count``) for kinds 1, 2, 3, 4,
-0x10, 0x11 and 0x12, every one of them empty::
+The payload is a run of sections, each a 5-byte header (``uint8 kind,
+uint32 count``) followed by ``count`` 8-byte records. Kinds 1, 2, 3, 4, 0x10,
+0x11 and 0x12 appear, in that order, whether or not they hold anything - an
+empty frame is 35 bytes of nothing but headers::
 
     01 00000000 | 02 00000000 | 03 00000000 | 04 00000000
     | 10 00000000 | 11 00000000 | 12 00000000
 
-The PowerShell happens to work because section 1 comes first, so its records
-- if there are any - start exactly where it looks for them. No file with
-actual markers exists in this workspace, so neither reading is proven.
+Only section 1 has ever been seen with records in it. The PowerShell reads a
+count at offset 1 and records from offset 5, which works only because
+section 1 comes first; it would misread markers of any other kind.
 
-Because of that, this frame is deliberately *not* registered in the frame
-factory: nothing in the read/write path depends on it, and a wrong guess here
-can never corrupt a file that is being cut or recomposed.
+Records are a single ``uint64`` timestamp on the same monotonic clock as
+``ExtraMetadata.FirstFrameTimestamp``. The PowerShell reads them as
+``uint32``, which is wrong for any recording whose clock has passed ~71
+minutes of uptime - confirmed against X5 files whose markers are all above
+2**32.
+
+This frame is deliberately *not* registered in the frame factory: nothing in
+the read/write path depends on it, so it cannot corrupt a file being cut or
+recomposed.
 """
 
 from __future__ import annotations
@@ -31,7 +36,7 @@ SECTION_HEADER_SIZE = 5
 RECORD_SIZE = 8
 
 _SECTION = struct.Struct("<BI")
-_TIMESTAMP = struct.Struct("<I")
+_TIMESTAMP = struct.Struct("<Q")
 
 
 @dataclass
@@ -78,8 +83,9 @@ def marker_seconds(payload: bytes, first_frame_timestamp: int) -> list[float]:
 
     Timestamps are on the same monotonic microsecond clock as
     ``ExtraMetadata.FirstFrameTimestamp`` (309468418 - about 309 s of uptime -
-    in sample.insv), which is why they fit in 32 bits and why the offset is
-    taken against the first frame rather than a Unix epoch.
+    in sample.insv), which is why the offset is taken against the first frame
+    rather than a Unix epoch. The clock does not reset between recordings, so
+    on a camera that has been on a while these run well past 32 bits.
     """
     return [
         (timestamp - first_frame_timestamp) / 1_000_000

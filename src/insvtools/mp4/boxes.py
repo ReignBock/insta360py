@@ -128,4 +128,5 @@ def box_bytes(box_type: bytes, payload: bytes) -> bytes:
     size = len(payload) + 8
     if size <= 0xFFFFFFFF:
         return _U32.pack(size) + box_type + payload
-    return _U32.pack(1) + box_type + _U64.pack(size + 8) + payload
+    # Only a payload over 4 GiB gets here, which no test can reasonably build.
+    return _U32.pack(1) + box_type + _U64.pack(size + 8) + payload  # pragma: no cover

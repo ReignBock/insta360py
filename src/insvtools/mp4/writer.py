@@ -318,7 +318,8 @@ def _write_mdat(
     if header_size == 8:
         out.write(_U32.pack(mdat_size + 8) + b"mdat")
     else:
-        out.write(_U32.pack(1) + b"mdat" + _U64.pack(mdat_size + 16))
+        # Real X5 files reach this; a test that did would have to write 4 GiB.
+        out.write(_U32.pack(1) + b"mdat" + _U64.pack(mdat_size + 16))  # pragma: no cover
 
     out.write(prefix)
 
@@ -403,7 +404,7 @@ def write_clipped(
 
         if settled:
             break
-    else:
+    else:  # pragma: no cover - guards against a moov size that oscillates
         raise ValueError("moov size did not converge")
 
     for kind, data in layout:

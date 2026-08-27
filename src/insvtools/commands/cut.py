@@ -9,8 +9,8 @@ from typing import Iterable, NamedTuple
 
 from ..frames.info_frame import InfoFrame
 from ..frames.timelapse_frame import TimelapseFrame
-from ..header import InsvHeader
-from ..metadata import InsvMetadata, read_metadata_optional
+from ..header import INST_BOX_HEADER_SIZE, InsvHeader
+from ..metadata import InsvMetadata, read_metadata_optional, write_trailer
 from ..mp4.reader import Mp4File, Track
 from ..mp4.writer import write_clipped
 
@@ -236,7 +236,7 @@ def cut_one(
     try:
         with source.open("rb") as f:
             header = InsvHeader.read(f)
-            mp4 = Mp4File.read(f, header.metadata_pos if header else None)
+            mp4 = Mp4File.read(f, header.container_end if header else None)
 
             start_time = _snap_to_keyframe(mp4, start_time, end_time)
             ranges, video = _sample_ranges(mp4, start_time, end_time)
@@ -251,10 +251,14 @@ def cut_one(
                 write_clipped(f, mp4, ranges, out)
 
                 if metadata is not None:
+                    boxed = header is not None and header.boxed
+                    # FileSize counts up to where the trailer proper starts,
+                    # which is past the inst box header when there is one.
+                    trailer_pos = out.tell() + (INST_BOX_HEADER_SIZE if boxed else 0)
                     _update_metadata(
-                        metadata, start_time, out.tell(), video, timestamp_scale
+                        metadata, start_time, trailer_pos, video, timestamp_scale
                     )
-                    metadata.write(out)
+                    write_trailer(out, metadata, boxed)
     except Exception:
         target.unlink(missing_ok=True)
         raise

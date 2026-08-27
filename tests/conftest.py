@@ -22,6 +22,18 @@ def sample_insv(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def x5_insv(tmp_path: Path) -> Path:
+    """A writable copy of the X5 fixture: indexed layout, inst box, markers.
+
+    Built by tools/mkfixture.py from a real recording; see that script for
+    what was truncated and scrubbed.
+    """
+    dest = tmp_path / "VID_20260620_173803_00_029.insv"
+    shutil.copy(RESOURCES / "x5_indexed.insv", dest)
+    return dest
+
+
+@pytest.fixture
 def golden() -> Path:
     """The reference outputs, or skip if they have not been generated."""
     if not (GOLDEN / "PROVENANCE").exists():
