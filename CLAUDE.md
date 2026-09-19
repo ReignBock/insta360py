@@ -96,7 +96,9 @@ and unmetered because the repository is public):
   and pyright once on 3.13, and a packaging job that builds both artifacts,
   installs the wheel into a clean venv, runs the console scripts, then
   unpacks the sdist and runs *its* tests. That last step is what keeps
-  MANIFEST.in honest.
+  MANIFEST.in honest. A pull-request-only `version` job fails when a tag
+  `v<project.version>` already exists, so a forgotten version bump is caught
+  before the release run and not by it.
 - **`release.yml`**, run from the Actions tab: `project.version` is the
   single source of truth, and the tag is derived from it, so the release, the
   tag, the wheel filename and `insvtools --version` cannot disagree. It runs

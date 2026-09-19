@@ -85,6 +85,27 @@ jobs:
       - name: pyright
         run: pyright
 
+  version:
+    name: Version is not already tagged
+    # Only on a pull request: once a release exists, its tag matches the
+    # version on main, so the same check would fail there.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The release workflow tags the commit with v<version> and refuses a
+      # version that already has a release. Catching that here means the
+      # version gets bumped in the pull request, not after a failed release.
+      - name: Check that no tag matches the project version
+        run: |
+          VERSION=$(python3 -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
+            echo "::error::Tag v$VERSION already exists. Bump the version in pyproject.toml."
+            exit 1
+          fi
+          echo "v$VERSION is not tagged yet"
+
   package:
     name: Build and verify the distribution
     runs-on: ubuntu-latest
