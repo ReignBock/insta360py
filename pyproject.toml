@@ -44,13 +44,14 @@ dev = [
     "pylint-protobuf",        # teaches pylint the generated ExtraMetadata fields
     "pyright>=1.1.400",       # type checker; the engine behind VS Code's Pylance
     "PySide6-Essentials>=6.7", # the window is tested headless; keep in step with the gui extra
+    "cryptography>=42",       # verifies update signatures; keep in step with the gui extra
 ]
 # Only needed to regenerate the protobuf bindings, which are committed. Kept
 # out of `dev` because it is a large download that no ordinary change needs.
 proto = ["grpcio-tools"]
 # The desktop window. PySide6-Essentials carries QtWidgets without the
 # add-on modules the full PySide6 wheel bundles.
-gui = ["PySide6-Essentials>=6.7"]
+gui = ["PySide6-Essentials>=6.7", "cryptography>=42"]
 
 [project.scripts]
 insvtools = "insvtools.cli:main"
@@ -67,7 +68,9 @@ where = ["src"]
 # type checker ignores the annotations and the generated .pyi stub entirely.
 # The .pyi is listed rather than left to setuptools' implicit stub handling.
 insvtools = ["*.proto", "*.pyi", "py.typed"]
-insvmarkers = ["py.typed"]
+# The release authority's certificate and the revocation list travel with the
+# package; the Mac app checks updates against them.
+insvmarkers = ["py.typed", "release_ca.pem", "release_crl.pem"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
