@@ -53,6 +53,23 @@ uv tool install .
 
 Each of these provides two commands, `insvtools` and `insv-markers`.
 
+### macOS
+
+macOS ships Python 3.9, and this project needs 3.12 or newer. From a checkout,
+one script handles it:
+
+```bash
+tools/setup-mac.sh          # install the two commands
+tools/setup-mac.sh --dev    # also set up the development environment
+```
+
+The script installs [uv](https://docs.astral.sh/uv/) into `~/.local/bin` if
+it is missing. uv downloads a suitable Python and installs the package. The
+plain install needs no sudo. With `--dev` the script also installs ffmpeg
+through Homebrew, and installs Homebrew first when it is missing. Homebrew's
+installer runs sudo and prompts for your password. Without ffmpeg, two tests
+skip.
+
 This is not on PyPI.
 
 ## Markers
