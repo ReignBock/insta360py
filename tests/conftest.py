@@ -61,3 +61,31 @@ def golden() -> Path:
     if not (GOLDEN / "PROVENANCE").exists():
         pytest.skip("golden outputs missing - run tools/refgen.sh (needs Docker)")
     return GOLDEN
+
+
+@pytest.fixture
+def nested_footage(tmp_path: Path) -> Path:
+    """A folder of memory cards with footage several folders down.
+
+    ``cards/card1/DCIM/Camera01`` and ``cards/card2/DCIM/Camera01`` each hold
+    one recording. Beside them are folders with nothing to find, and hidden
+    junk that carries footage-looking names: a trash folder and the ``._``
+    copy a Mac drive keeps of every file.
+    """
+    root = tmp_path / "cards"
+
+    for card, stamp in (("card1", "20260620_173803"), ("card2", "20260621_090000")):
+        camera = root / card / "DCIM" / "Camera01"
+        camera.mkdir(parents=True)
+        shutil.copy(RESOURCES / "x5_indexed.insv", camera / f"VID_{stamp}_00_029.insv")
+        shutil.copy(RESOURCES / "x5_indexed.insv", camera / f"._VID_{stamp}_00_029.insv")
+
+    (root / "card1" / "Notes").mkdir()
+    (root / "card1" / "Notes" / "readme.txt").write_text("not footage")
+    (root / "card2" / "empty").mkdir()
+
+    trash = root / ".Trashes" / "501"
+    trash.mkdir(parents=True)
+    shutil.copy(RESOURCES / "x5_indexed.insv", trash / "VID_20260101_000000_00_001.insv")
+
+    return root

@@ -204,3 +204,36 @@ def test_a_trailer_without_an_anchors_frame_contributes_no_markers(
     path = _trailer_without(sample_insv, tmp_path / "no_anchors.insv", FrameType.ANCHORS)
 
     assert markers_in(path, 0) == []
+
+
+def test_a_recursive_search_finds_footage_at_any_depth(nested_footage: Path) -> None:
+    """Both recordings turn up, however many folders down they sit."""
+    found = expand_paths([nested_footage], recursive=True)
+
+    assert [path.name for path in found] == [
+        "VID_20260620_173803_00_029.insv",
+        "VID_20260621_090000_00_029.insv",
+    ]
+
+
+def test_a_recursive_search_skips_hidden_folders_and_files(nested_footage: Path) -> None:
+    """The trash folder and the ``._`` copies are not footage."""
+    found = expand_paths([nested_footage], recursive=True)
+
+    assert not [path for path in found if path.name.startswith(".")]
+    assert not [path for path in found if ".Trashes" in path.parts]
+
+
+def test_the_default_search_stays_one_level_deep(nested_footage: Path) -> None:
+    """The command line keeps looking only inside the folder it is given."""
+    assert not expand_paths([nested_footage])
+
+
+def test_a_recursive_search_still_takes_named_files_as_given(x5_insv: Path) -> None:
+    """Recursion only changes what a folder means."""
+    assert expand_paths([x5_insv], recursive=True) == [x5_insv]
+
+
+def test_a_recursive_search_lists_files_in_a_stable_order(nested_footage: Path) -> None:
+    """The same folder gives the same list every time."""
+    assert expand_paths([nested_footage], recursive=True) == expand_paths([nested_footage], recursive=True)

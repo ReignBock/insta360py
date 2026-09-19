@@ -7,7 +7,7 @@ Nothing here prints or draws. The command line and the GUI each present a
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .extractor import (
@@ -82,3 +82,62 @@ def report_lines(result: SessionResult) -> list[str]:
     lines.append("")
 
     return lines
+
+
+@dataclass
+class FolderNode:
+    """A folder on the way from a searched folder down to a recording.
+
+    Only folders that lead to at least one recording exist as nodes, so the
+    tree shows the route to the footage and nothing else.
+    """
+
+    path: Path
+    folders: list[FolderNode] = field(default_factory=list)
+    sessions: list[SessionResult] = field(default_factory=list)
+
+    @property
+    def recording_count(self) -> int:
+        """Recordings in this folder and every folder beneath it."""
+        return len(self.sessions) + sum(folder.recording_count for folder in self.folders)
+
+    def child(self, name: str) -> FolderNode:
+        """The subfolder called ``name``, added the first time it is needed."""
+        for folder in self.folders:
+            if folder.path.name == name:
+                return folder
+
+        folder = FolderNode(self.path / name)
+        self.folders.append(folder)
+        return folder
+
+
+def group_by_folder(
+    results: list[SessionResult], searched: list[Path]
+) -> tuple[list[FolderNode], list[SessionResult]]:
+    """Arrange recordings under the folders that were searched.
+
+    Returns the searched folders that hold recordings, each with the folders
+    between it and the footage, and the recordings that lie under none of
+    them (files that were added one by one). A recording under several
+    searched folders goes under the closest.
+    """
+    given = list(dict.fromkeys(folder.absolute() for folder in searched))
+    closest_first = sorted(given, key=lambda folder: len(folder.parts), reverse=True)
+    roots: dict[Path, FolderNode] = {}
+    loose: list[SessionResult] = []
+
+    for result in results:
+        directory = result.sequence.files[0].parent.absolute()
+        root = next((folder for folder in closest_first if folder in (directory, *directory.parents)), None)
+
+        if root is None:
+            loose.append(result)
+            continue
+
+        node = roots.setdefault(root, FolderNode(root))
+        for name in directory.relative_to(root).parts:
+            node = node.child(name)
+        node.sessions.append(result)
+
+    return [roots[folder] for folder in given if folder in roots], loose

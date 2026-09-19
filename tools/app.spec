@@ -4,14 +4,30 @@
 # version comes from the installed package, which keeps the app, the wheel and
 # `insvtools --version` in step.
 from importlib.metadata import version
+from pathlib import Path
+
+from PyInstaller.utils.hooks import copy_metadata
 
 VERSION = version("insta360py")
+
+# The running app reads its own version from package metadata, which
+# PyInstaller does not collect unless asked.
+datas = copy_metadata("insta360py")
+
+# What updates are checked against: the release authority's certificate, and
+# the revocation list as it was at build time. The certificate is required; the
+# list is optional because the app also downloads the current one.
+PACKAGE = Path(SPECPATH).parent / "src" / "insvmarkers"
+for name in ("release_ca.pem", "release_crl.pem"):
+    if (PACKAGE / name).is_file():
+        datas.append((str(PACKAGE / name), "insvmarkers"))
 
 analysis = Analysis(
     ["app_entry.py"],
     pathex=["../src"],
+    datas=datas,
     # Qt pieces the window never loads. Dropping them keeps the download small.
-    excludes=["PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtNetwork", "PySide6.QtOpenGL", "PySide6.QtPdf"],
+    excludes=["PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtOpenGL", "PySide6.QtPdf"],
 )
 
 app = EXE(

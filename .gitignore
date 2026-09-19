@@ -223,3 +223,4 @@ build-app/
 
 # The app build spec is source, not a PyInstaller by-product.
 !tools/app.spec
+

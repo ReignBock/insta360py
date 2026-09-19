@@ -30,12 +30,17 @@ prefix each command with `uv run`:
 
 ```bash
 uv sync --extra dev
-uv run pytest --cov   # 237 tests; fails under 100% coverage (plain pytest does not measure it)
+uv run pytest --cov   # 430 tests; fails under 100% coverage (plain pytest does not measure it)
 uv run pylint src tests tools
 uv run pyright
 ```
 
 Run a single test or file with `uv run pytest tests/test_mp4_writer.py::test_name`.
+
+The `test` extra is what running the tests needs (pytest, Qt, cryptography); `dev`
+adds the linters on top. The CI sdist check installs `test`, so the whole suite
+runs from the unpacked sdist. A test dependency belongs in `test`, and a test
+module should never be excluded from collection because one is missing.
 
 Three gates, all currently clean, all expected to stay that way:
 
@@ -257,8 +262,9 @@ ANCHORS, which the factory deliberately does not map to a class.
 ### `insvmarkers`
 
 `extractor.py` (sessions and markers, cross-platform), `results.py` (scans files
-into `SessionResult`s and renders the text report; shared by the CLI and the
-window, and free of Qt and printing), `studio.py` (the `.insprj` keyframe
+into `SessionResult`s, renders the text report, and arranges recordings under
+the folders searched with `group_by_folder`; shared by the CLI and the window,
+and free of Qt and printing), `studio.py` (the `.insprj` keyframe
 injection) and `gui.py` (the PySide6 window). Keep decisions about *what to
 show* in `results.py`; `gui.py` only arranges it on screen. Locating Studio's project is Windows-only, but
 everything that edits the JSON is plain data handling and is tested off
@@ -280,6 +286,15 @@ Qt's offscreen platform (`tests/test_gui.py` sets `QT_QPA_PLATFORM` itself;
 do not export it in the shell, or the real window goes offscreen too). It
 reads files and never injects into Studio: injection is unverified.
 
+Folder search is recursive in the window only. `expand_paths(paths,
+recursive=True)` walks with `os.walk`, skips hidden folders and files (the
+trash, Spotlight's index and the `._` copies a Mac drive keeps), and lists
+files in sorted depth-first order. The CLI still calls it without `recursive`
+and looks one level deep. `find_sessions` keys on the session id, so a
+recording found in two folders is listed once, under the first folder seen.
+The window walks on the UI thread (a wait cursor, no cancel), so a very large
+folder freezes it until the walk ends.
+
 Two routes put it on a desktop:
 
 - **`tools/build-app.sh`** freezes it with PyInstaller (`tools/app.spec`,
@@ -295,6 +310,76 @@ Two routes put it on a desktop:
 
 On NixOS the pip Qt wheels need system libraries; `flake.nix` puts them on
 `LD_LIBRARY_PATH` for Linux only.
+
+### Updating the Mac app
+
+`update.py` (Qt-free: versions, release parsing, certificate and CRL checks,
+staging, the swap script) and `updater.py` (the window's side:
+`UpdateController`, dialogs, `QtFetcher`). `gui.main` calls
+`updater.create(window)`, which returns `None` unless the process is a frozen
+`.app` **and** `release_ca.pem` is present, so `uv` installs never check.
+
+- **Trust.** The app carries a CA certificate (`src/insvmarkers/release_ca.pem`,
+  committed). Each release zip ships with `<zip>.sig` (a base64 Ed25519
+  signature by the *release key*) and `<zip>.crt` (the release key's
+  certificate, issued by the CA). `check_release` requires, in order: issued
+  directly by the CA; a code-signing leaf (`CA:FALSE`, `digitalSignature`,
+  `codeSigning`); in date; not on a current CRL; the certificate's key made the
+  signature. A file the app downloads has no quarantine flag, so Gatekeeper
+  never sees it: these checks are the *only* ones. `stage()` also confirms the
+  version inside the app equals the version the release named, so an old
+  signed zip cannot pass as a new one.
+- **Revocation.** The CRL is `src/insvmarkers/release_crl.pem`, committed. The
+  app trusts the union of three copies (built in, cached from a previous
+  download, and the one at `update.CRL_URL` on `main`, fetched at install
+  time), keeping only lists the CA signed and that have not passed their
+  next-update date. If none is usable the update is refused. A certificate on
+  any usable list is refused, so an older list cannot hide a revocation.
+  Revoking is a commit: running apps see it at their next install with no new
+  app. It does not touch versions already installed.
+- **Keys and scripts.** `tools/pki/` (see its README) creates the CA, issues
+  and revokes release certificates, and writes the CRL, all with `openssl ca`
+  and `openssl-ca.cnf`. The CA key stays offline (`~/release-keys` by default,
+  outside the repo). The only GitHub secret is
+  `RELEASE_SIGNING_KEY` (the release private key, PEM). Everything else is
+  public and committed: `release_ca.pem`, `release_crl.pem` and the release
+  certificate `tools/pki/release.crt` (which `issue-release-cert.sh` writes
+  there, overwriting the previous one). `tools/sign_release.py`
+  runs the app's own `check_release` before writing `.sig` and `.crt`, so a
+  wrong pairing or a revoked, expired or missing-CRL setup fails in CI, not on
+  a Mac. `tools/check_setup.py` fails a release whose bundled CRL has expired
+  (warns under 30 days left) or whose committed certificate is revoked,
+  expired, or not from the CA (warns under 90 days left), and, when
+  `RELEASE_SIGNING_KEY` is in the environment, whose key does not belong to
+  the committed certificate; the certificate checks are `update.check_certificate`,
+  shared with the app. Losing the CA key means no new release
+  certificates or CRLs can be made and installed apps must be replaced by hand;
+  losing only a release key costs nothing, since a new one is issued.
+- **Workflow order.** `release.yml` fails first if the key secret is missing or
+  `check_setup.py` fails, before any tag exists. `macos-app.yml` builds (the CA
+  certificate and CRL are bundled from `src/insvmarkers` by `app.spec`), signs,
+  and attaches zips, `.sig`, `.crt` and `release_ca.pem`. The release is
+  published before the app jobs run, so a failed app job leaves a release with
+  no app assets: the updater then sees no usable release and offers nothing.
+- **Swap.** A running app cannot replace itself, so `start_swap` writes
+  `swap.sh` to `~/Library/Application Support/Insta360 Markers/` and starts it
+  detached; it waits for the app's pid to exit, moves the current app aside,
+  moves the new one in, keeps the old as `Previous/`, and reopens. If moving
+  the new app in fails it restores the old one. A rollback is the same script
+  with the previous app as both the new app and the previous slot, which swaps
+  them. Extraction uses `ditto` (Python's `zipfile` would lose the bundle's
+  symlinks and modes).
+- **Cannot update** when the path contains `AppTranslocation` (a freshly
+  downloaded app runs from a read-only copy until moved) or the folder is not
+  writable; `install_problem` returns the message shown.
+- **Network** uses `QNetworkAccessManager`, not `urllib`: a bundled Python does
+  not reliably trust the macOS certificate store, Qt does. `QtNetwork` must
+  stay out of the spec's `excludes`. The fetcher must outlive its requests
+  (destroying it mid-flight crashes Qt), which is why tests share one.
+- **Cadence.** `start()` checks once as the window opens and then on a 24-hour
+  `QTimer`. A failed automatic check is silent; a manual one reports. A skipped
+  version is remembered in `QSettings` and a rollback also skips the version
+  it left, so it is not re-offered at every launch.
 
 ## CLI surfaces
 
@@ -348,6 +433,15 @@ future must be scrubbed the same way.
 
 ## Known gaps
 
+- **The updater has never run a whole update on a real display.** Verified on
+  a Mac over SSH (before the CA model): `ditto` staging, the swap and rollback
+  against real bundles, `codesign --verify --deep --strict` on the swapped
+  app, no quarantine flag, the swapped app starting, and real HTTPS to GitHub.
+  The chain, CRL and script logic is covered by tests, and the `tools/pki`
+  scripts were run against OpenSSL 3, including on the Mac with Homebrew's
+  (they skip where only LibreSSL is on PATH). Not verified: the prompt and progress dialogs on screen, and the relaunch
+  through `open` after the app quits. No release yet carries signed zips, so
+  the first update will be the first end-to-end run.
 - **The window has never been seen on a real display.** It is tested
   headless, and the frozen app and the launcher were shown to start under the
   offscreen platform on a Mac over SSH. `open` fails over SSH (no graphical

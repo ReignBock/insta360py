@@ -1,0 +1,41 @@
+# OpenSSL settings for the release authority. Used by the scripts in this
+# folder through `openssl ca -config`; read tools/pki/README.md first.
+#
+# PKI_DIR (where the authority lives) and CA_KEY (its private key) come from
+# the environment, set by lib.sh.
+
+[ ca ]
+default_ca = release_ca
+
+[ release_ca ]
+dir               = $ENV::PKI_DIR
+private_key       = $ENV::CA_KEY
+certificate       = $dir/ca.crt
+database          = $dir/db/index.txt
+serial            = $dir/db/serial
+crlnumber         = $dir/db/crlnumber
+new_certs_dir     = $dir/db/certs
+# Ed25519 chooses its own hash; "default" is how OpenSSL is told to let it.
+default_md        = default
+policy            = policy_release
+unique_subject    = no
+copy_extensions   = none
+x509_extensions   = release_cert
+crl_extensions    = crl_ext
+default_days      = 1826
+default_crl_days  = 365
+
+[ policy_release ]
+commonName        = supplied
+
+# What a release signing certificate is allowed to do: sign code, and nothing
+# else. The app refuses a certificate that does not say so.
+[ release_cert ]
+basicConstraints       = critical, CA:FALSE
+keyUsage               = critical, digitalSignature
+extendedKeyUsage       = codeSigning
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid
+
+[ crl_ext ]
+authorityKeyIdentifier = keyid:always
