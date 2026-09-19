@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,25 +42,46 @@ class Sequence:
     files: tuple[Path, ...]
 
 
-def videos_below(folder: Path) -> list[Path]:
-    """Every video file in a folder and all the folders beneath it.
+def video_folders(folder: Path) -> Iterator[list[Path]]:
+    """The video files of a folder and of every folder beneath it, one list per folder.
 
     Hidden folders and files (a leading dot) are skipped. On a Mac drive those
     are the trash, Spotlight's index and the ``._`` copies of each file, none
     of which is footage. Order is depth first with names sorted, so a repeated
-    search of the same folder lists files the same way.
+    search of the same folder lists files the same way. Folders without video
+    files yield nothing. Being a generator, the walk can be stopped part way.
     """
-    found: list[Path] = []
-
     for directory, subdirectories, names in os.walk(folder):
         subdirectories[:] = sorted(name for name in subdirectories if not name.startswith("."))
-        found.extend(
+        videos = [
             Path(directory, name)
             for name in sorted(names)
             if not name.startswith(".") and Path(name).suffix.lower() in VIDEO_SUFFIXES
-        )
+        ]
 
-    return found
+        if videos:
+            yield videos
+
+
+def videos_below(folder: Path) -> list[Path]:
+    """Every video file in a folder and all the folders beneath it."""
+    return [video for videos in video_folders(folder) for video in videos]
+
+
+def walk_paths(paths: list[Path]) -> Iterator[list[Path]]:
+    """Like ``expand_paths(paths, recursive=True)``, one list at a time.
+
+    A folder gives a list for each folder beneath it that holds footage, and a
+    file gives a list of itself. A window can show the first before the last
+    has been found.
+    """
+    for path in paths:
+        if path.is_dir():
+            yield from video_folders(path)
+        elif path.is_file():
+            yield [path]
+        else:
+            logger.warning("Skipping %s: not a file or directory", path)
 
 
 def expand_paths(paths: list[Path], recursive: bool = False) -> list[Path]:

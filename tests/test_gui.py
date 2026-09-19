@@ -4,6 +4,7 @@
 
 import os
 import shutil
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ from PySide6.QtGui import QDragEnterEvent, QDropEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QTreeWidgetItem  # noqa: E402
 
 from insvmarkers import gui  # noqa: E402
-from insvmarkers.gui import EMPTY_TEXT, MainWindow  # noqa: E402
+from insvmarkers.gui import EMPTY_TEXT, MainWindow, _Walker  # noqa: E402
 
 # pylint: enable=wrong-import-position,no-name-in-module
 
@@ -35,9 +36,34 @@ def app() -> QApplication:
 
 
 @pytest.fixture
-def window(app: QApplication) -> MainWindow:  # pylint: disable=unused-argument
-    """A fresh, empty window."""
-    return MainWindow()
+def window(app: QApplication) -> Iterator[MainWindow]:  # pylint: disable=unused-argument
+    """A fresh, empty window. Closing it afterwards waits for any walk still running."""
+    opened = MainWindow()
+    yield opened
+    opened.close()
+
+
+READ_NEXT = MainWindow._read_next  # pylint: disable=protected-access
+
+
+@pytest.fixture
+def held_window(app: QApplication, monkeypatch: pytest.MonkeyPatch) -> Iterator[MainWindow]:  # pylint: disable=unused-argument
+    """A window that finds recordings but never reads them, until a test calls ``_read_one``."""
+    monkeypatch.setattr(MainWindow, "_read_next", lambda self: None)
+    opened = MainWindow()
+    yield opened
+    opened.close()
+
+
+def _read_one(window: MainWindow) -> None:
+    """Read the next queued recording on a ``held_window``."""
+    READ_NEXT(window)
+
+
+def _walked(window: MainWindow) -> None:
+    """Let the search finish, without asking for the reading to finish too."""
+    while window._walker is not None:  # pylint: disable=protected-access
+        QApplication.processEvents()
 
 
 def _rows(window: MainWindow) -> list[list[str]]:
@@ -61,6 +87,9 @@ def _settle(window: MainWindow) -> None:
     """Let the window read every recording it has queued."""
     while window.reading:
         QApplication.processEvents()
+
+    for walker in window._retired:  # pylint: disable=protected-access
+        walker.wait()
 
 
 def _drop(window: MainWindow, paths: list[Path]) -> None:
@@ -415,56 +444,128 @@ def test_a_loose_file_is_listed_beside_a_searched_folder(
     assert tops == [str(nested_footage), "VID_20260701_120000 (1 file)"]
 
 
-def test_the_wait_cursor_is_restored_after_a_search(window: MainWindow, session_dir: Path) -> None:
-    """The busy cursor must not outlive the search."""
+def test_the_search_does_not_block_the_caller(window: MainWindow, session_dir: Path) -> None:
+    """add_paths returns at once, with the walk still to do."""
     window.add_paths([session_dir])
+
+    assert window.reading
+    assert not _rows(window)
+    assert window._status.text().startswith("Searching folders")  # pylint: disable=protected-access
+
     _settle(window)
 
-    assert QApplication.overrideCursor() is None
+
+def test_the_walker_reports_each_folder_then_finishes(window: MainWindow, nested_footage: Path) -> None:
+    """Run in this thread, the walk emits a batch per folder and then done."""
+    walker = _Walker(7, [nested_footage], window)
+    seen: list[tuple[str, int, int]] = []
+    walker.found.connect(lambda token, videos: seen.append(("found", token, len(videos))))
+    walker.done.connect(lambda token: seen.append(("done", token, 0)))
+
+    walker.run()
+
+    assert seen == [("found", 7, 1), ("found", 7, 1), ("done", 7, 0)]
 
 
-def test_the_wait_cursor_is_restored_when_a_search_fails(
-    window: MainWindow, session_dir: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_walker_asked_to_stop_reports_nothing_more(
+    window: MainWindow, nested_footage: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An error mid-search still puts the normal cursor back."""
+    """An interrupted walk ends without a done signal."""
+    walker = _Walker(7, [nested_footage], window)
+    seen: list[int] = []
+    walker.found.connect(lambda token, _videos: seen.append(token))
+    walker.done.connect(seen.append)
+    # Qt only honours a request on a running thread, and this one runs here.
+    monkeypatch.setattr(walker, "isInterruptionRequested", lambda: True)
 
-    def fail(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("disk gone")
+    walker.run()
 
-    monkeypatch.setattr(gui, "find_recordings", fail)
-
-    with pytest.raises(RuntimeError):
-        window.add_paths([session_dir])
-
-    assert QApplication.overrideCursor() is None
+    assert not seen
 
 
-def test_the_folders_are_listed_before_any_recording_is_read(window: MainWindow, session_dir: Path) -> None:
-    """The structure shows at once, each recording marked as reading."""
-    window.add_paths([session_dir])
+def test_the_folders_are_listed_before_any_recording_is_read(held_window: MainWindow, session_dir: Path) -> None:
+    """The structure shows once the walk ends, each recording marked as reading."""
+    held_window.add_paths([session_dir])
+    _walked(held_window)
 
-    assert window.reading
-    assert _rows(window)[1] == ["VID_20260620_173803 (2 files)", "Reading…", ""]
-    assert "0 of 1 recording" in window._status.text()  # pylint: disable=protected-access
-    assert not window._copy.isEnabled()  # pylint: disable=protected-access
+    assert held_window.reading
+    assert _rows(held_window)[1] == ["VID_20260620_173803 (2 files)", "Reading…", ""]
+    assert "0 of 1 recording" in held_window._status.text()  # pylint: disable=protected-access
+    assert not held_window._copy.isEnabled()  # pylint: disable=protected-access
 
+    _read_one(held_window)
+
+    assert _rows(held_window)[1][1] == "3 markers"
+    assert held_window._copy.isEnabled()  # pylint: disable=protected-access
+
+
+def test_recordings_are_read_one_at_a_time(held_window: MainWindow, nested_footage: Path) -> None:
+    """Each turn reads one recording, so the window keeps responding."""
+    held_window.add_paths([nested_footage])
+    _walked(held_window)
+    total = len(held_window._results)  # pylint: disable=protected-access
+    assert total == 2
+
+    _read_one(held_window)
+
+    assert held_window._queue  # pylint: disable=protected-access
+    assert f"1 of {total} recordings" in held_window._status.text()  # pylint: disable=protected-access
+
+
+def test_a_recording_can_be_read_before_it_is_drawn(window: MainWindow, x5_insv: Path) -> None:
+    """Reading a recording the redraw has not reached yet just keeps its result."""
+    # pylint: disable=protected-access
+    window._on_found(window._token, [x5_insv])
+    window._reader.stop()
+    window._redraw.stop()
+    sequence = next(iter(window._results))
+    assert window._results[sequence].pending
+
+    window._read_next()
+
+    assert window._results[sequence].markers
+    assert not window._items
+
+
+def test_a_recording_found_twice_is_listed_once(window: MainWindow, x5_insv: Path) -> None:
+    """Two folders that hold the same session give one recording."""
+    # pylint: disable=protected-access
+    window._on_found(window._token, [x5_insv])
+    window._on_found(window._token, [x5_insv])
+    window._reader.stop()
+    window._redraw.stop()
+
+    assert len(window._results) == 1
+    assert len(window._queue) == 1
+
+
+def test_a_walk_that_was_replaced_is_ignored(window: MainWindow, x5_insv: Path) -> None:
+    """Late results from an old walk change nothing."""
+    # pylint: disable=protected-access
+    window._on_found(window._token + 1, [x5_insv])
+    window._on_done(window._token + 1)
+
+    assert not window._results
+    assert not window._queue
+
+
+def test_adding_again_while_searching_starts_over(window: MainWindow, nested_footage: Path) -> None:
+    """A second add replaces the walk in progress and every recording is listed once."""
+    window.add_paths([nested_footage])
+    window.add_paths([nested_footage])
     _settle(window)
 
-    assert _rows(window)[1][1] == "3 markers"
-    assert window._copy.isEnabled()  # pylint: disable=protected-access
+    assert len([row for row in _rows(window) if row[0].startswith("VID_")]) == 2
 
 
-def test_recordings_are_read_one_at_a_time(window: MainWindow, nested_footage: Path, tmp_path: Path) -> None:
-    """Each event-loop turn reads one recording, so the window keeps responding."""
-    shutil.copy(RESOURCES / "x5_indexed.insv", tmp_path / "VID_20260701_120000_00_001.insv")
-    window.add_paths([nested_footage, tmp_path])
-    total = len(window._results)  # pylint: disable=protected-access
-    assert total > 1
+def test_closing_the_window_stops_the_walk(window: MainWindow, nested_footage: Path) -> None:
+    """The thread is finished by the time the window has closed."""
+    window.add_paths([nested_footage])
 
-    window._read_next()  # pylint: disable=protected-access
+    window.close()
 
-    assert window.reading
-    assert f"1 of {total} recordings" in window._status.text()  # pylint: disable=protected-access
+    assert not window.reading
+    assert all(walker.isFinished() for walker in window._retired)  # pylint: disable=protected-access
 
 
 def test_adding_more_footage_keeps_what_was_already_read(
@@ -488,9 +589,9 @@ def test_adding_more_footage_keeps_what_was_already_read(
     assert not calls
 
 
-def test_clearing_stops_the_reading(window: MainWindow, session_dir: Path) -> None:
-    """Nothing is read after Clear, and nothing comes back."""
-    window.add_paths([session_dir])
+def test_clearing_stops_the_search(window: MainWindow, nested_footage: Path) -> None:
+    """Nothing is listed after Clear, even from a walk that was still going."""
+    window.add_paths([nested_footage])
 
     window.clear()
     _settle(window)

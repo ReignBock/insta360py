@@ -11,12 +11,13 @@ module only arranges it on screen.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 # pylint reads no compiled extensions, so it cannot see Qt's names.
 # pylint: disable=no-name-in-module
-from PySide6.QtCore import QMimeData, Qt, QTimer
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtCore import QMimeData, QThread, Qt, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -34,7 +35,7 @@ from PySide6.QtWidgets import (
 
 # pylint: enable=no-name-in-module
 
-from .extractor import VIDEO_SUFFIXES, Sequence, expand_paths, format_timestamp
+from .extractor import VIDEO_SUFFIXES, Sequence, format_timestamp, walk_paths
 from .results import (
     FolderNode,
     SessionResult,
@@ -60,6 +61,42 @@ def _local_paths(mime: QMimeData) -> list[Path]:
     return [Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()]
 
 
+def _button(text: str, slot: Callable[[], None]) -> QPushButton:
+    """A push button that calls ``slot`` when clicked."""
+    button = QPushButton(text)
+    button.clicked.connect(slot)
+
+    return button
+
+
+class _Walker(QThread):  # pylint: disable=too-few-public-methods  # a thread's whole job is run()
+    """Walks folders off the UI thread, reporting the footage of each folder as it goes.
+
+    ``found`` carries the walk's ``token`` so the window can ignore a walk it
+    has replaced, and ``done`` follows the last ``found``.
+    """
+
+    found = Signal(int, list)
+    done = Signal(int)
+
+    def __init__(self, token: int, paths: list[Path], parent: QMainWindow) -> None:
+        super().__init__(parent)
+        self.token = token
+        self._paths = paths
+
+    def run(self) -> None:
+        """Walk until finished or asked to stop."""
+        for videos in walk_paths(self._paths):
+            if self.isInterruptionRequested():
+                return
+            self.found.emit(self.token, videos)
+
+        self.done.emit(self.token)
+
+
+REDRAW_MS = 100
+
+
 class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  # a window holds its widgets
     """The one window of the app."""
 
@@ -70,14 +107,27 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  
         self.setAcceptDrops(True)
 
         self._paths: list[Path] = []
-        # Every recording found, in the order shown. Pending ones are read one
-        # at a time from the event loop, so the window stays responsive.
+        # A walk runs on its own thread and reports footage folder by folder.
+        # Every recording found is listed at once as pending, and the pending
+        # ones are read one at a time from the event loop, so the window
+        # stays responsive throughout. A new walk replaces the old one, and
+        # recordings already read (``_done``) are not read again.
+        self._walker: _Walker | None = None
+        self._retired: list[_Walker] = []
+        self._token = 0
+        self._session_ids: set[str] = set()
         self._results: dict[Sequence, SessionResult] = {}
+        self._done: dict[Sequence, SessionResult] = {}
         self._items: dict[Sequence, QTreeWidgetItem] = {}
         self._queue: list[Sequence] = []
         self._reader = QTimer(self)
         self._reader.setSingleShot(True)
         self._reader.timeout.connect(self._read_next)
+        # Redrawing the whole list for every folder found would be slow, so
+        # new footage is drawn at most this often.
+        self._redraw = QTimer(self)
+        self._redraw.setSingleShot(True)
+        self._redraw.timeout.connect(lambda: self._refresh(searched=True))
         self._updater: UpdateController | None = None
 
         self._tree = QTreeWidget()
@@ -95,16 +145,11 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  
 
         self._status = QLabel("")
 
-        add_files = QPushButton("Add Files…")
-        add_files.clicked.connect(self.choose_files)
-        add_folder = QPushButton("Add Folder…")
-        add_folder.clicked.connect(self.choose_folder)
-        self._clear = QPushButton("Clear")
-        self._clear.clicked.connect(self.clear)
-        self._copy = QPushButton("Copy")
-        self._copy.clicked.connect(self.copy_report)
-        self._save = QPushButton("Save…")
-        self._save.clicked.connect(self.save_report)
+        add_files = _button("Add Files…", self.choose_files)
+        add_folder = _button("Add Folder…", self.choose_folder)
+        self._clear = _button("Clear", self.clear)
+        self._copy = _button("Copy", self.copy_report)
+        self._save = _button("Save…", self.save_report)
 
         buttons = QHBoxLayout()
         for button in (add_files, add_folder, self._clear):
@@ -133,34 +178,72 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  
     # Adding footage
 
     def add_paths(self, paths: list[Path]) -> None:
-        """Add files or folders, list the recordings they hold, then read each in turn.
+        """Add files or folders and search them.
 
-        The list appears as soon as the folders are walked, with every
-        recording marked as reading. Recordings read earlier keep their result.
+        Recordings show up as their folders are walked, each marked as reading
+        until its markers are found. Recordings read earlier keep their result.
         """
         for path in paths:
             if path not in self._paths:
                 self._paths.append(path)
 
-        # Walking a large folder can take a while; show that the app is busy.
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        QApplication.processEvents()
-        try:
-            found = find_recordings(expand_paths(self._paths, recursive=True))
-        finally:
-            QApplication.restoreOverrideCursor()
-
-        self._reader.stop()
-        done = {sequence: result for sequence, result in self._results.items() if not result.pending}
-        self._results = {entry.sequence: done.get(entry.sequence, entry) for entry in found}
-        self._queue = [sequence for sequence, result in self._results.items() if result.pending]
+        self._stop_walking()
+        self._token += 1
+        self._session_ids = set()
+        self._results = {}
+        self._queue = []
+        self._walker = _Walker(self._token, list(self._paths), self)
+        self._walker.found.connect(self._on_found)
+        self._walker.done.connect(self._on_done)
         self._refresh(searched=True)
-        self._reader.start(0)
+        self._walker.start()
 
     @property
     def reading(self) -> bool:
-        """Whether recordings are still waiting to be read."""
-        return bool(self._queue)
+        """Whether the search or the reading of markers is still going."""
+        return self._walker is not None or bool(self._queue) or self._redraw.isActive()
+
+    def _stop_walking(self) -> None:
+        """Stop the walk and the reading. A stopped walk finishes on its own."""
+        self._reader.stop()
+        self._redraw.stop()
+        self._queue = []
+
+        if self._walker is not None:
+            self._walker.requestInterruption()
+            self._retired = [walker for walker in self._retired if not walker.isFinished()] + [self._walker]
+            self._walker = None
+
+    def _on_found(self, token: int, videos: list[Path]) -> None:
+        """List the recordings in one more folder, and start reading them."""
+        if token != self._token:
+            return
+
+        for found in find_recordings(videos):
+            sequence = found.sequence
+            if sequence.session_id in self._session_ids:
+                continue
+
+            self._session_ids.add(sequence.session_id)
+            self._results[sequence] = self._done.get(sequence, found)
+            if sequence not in self._done:
+                self._queue.append(sequence)
+
+        if not self._redraw.isActive():
+            self._redraw.start(REDRAW_MS)
+        if not self._reader.isActive():
+            self._reader.start(0)
+
+    def _on_done(self, token: int) -> None:
+        """The walk has listed everything: draw it and let the reading finish."""
+        if token != self._token:
+            return
+
+        if self._walker is not None:
+            self._retired.append(self._walker)
+        self._walker = None
+        self._redraw.stop()
+        self._refresh(searched=True)
 
     def _read_next(self) -> None:
         """Read the next waiting recording and update its row."""
@@ -170,7 +253,12 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  
         sequence = self._queue.pop(0)
         result = read_session(sequence)
         self._results[sequence] = result
-        self._fill_session(self._items[sequence], result)
+        self._done[sequence] = result
+
+        # A recording found a moment ago may not be drawn yet; the redraw will.
+        item = self._items.get(sequence)
+        if item is not None:
+            self._fill_session(item, result)
         self._update_controls(searched=True)
 
         if self._queue:
@@ -189,11 +277,18 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  
 
     def clear(self) -> None:
         """Forget everything added so far."""
-        self._reader.stop()
-        self._queue.clear()
+        self._stop_walking()
+        self._token += 1
         self._paths.clear()
         self._results = {}
         self._refresh()
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # pylint: disable=invalid-name
+        """Stop the walk, and wait for it: a thread must not outlive its window."""
+        self._stop_walking()
+        for walker in self._retired:
+            walker.wait()
+        super().closeEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # pylint: disable=invalid-name
         """Accept a drag that carries files."""
@@ -242,6 +337,8 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  
         self._tree.clear()
         self._items = {}
 
+        scroll = self._tree.verticalScrollBar()
+        position = scroll.value()
         results = list(self._results.values())
         folders, loose = group_by_folder(results, [path for path in self._paths if path.is_dir()])
         for folder in folders:
@@ -249,6 +346,7 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  
         for result in loose:
             self._tree.addTopLevelItem(self._session_item(result))
         self._tree.expandAll()
+        scroll.setValue(position)
         self._update_controls(searched)
 
     def _update_controls(self, searched: bool) -> None:
@@ -266,6 +364,10 @@ class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  
         """One line saying what the last search found."""
         if not searched:
             return ""
+
+        if self._walker is not None:
+            found = _plural(len(self._results), "recording")
+            return f"Searching folders: {found} found, {len(self._results) - len(self._queue)} read."
 
         if not self._results:
             return "No recordings found. Check that the files are .insv or .lrv files from the camera."
