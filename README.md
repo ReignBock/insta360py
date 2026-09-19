@@ -28,45 +28,58 @@ frame types nobody has documented.
 
 ## Mac app
 
-The Mac app shows the markers of your Insta360 footage in a window. You
-install nothing else.
+The Mac app shows the markers of your Insta360 footage in a window. There are
+two ways to get it.
+
+**Download the app.** You install nothing else, but macOS warns on the first
+launch.
 
 1. Download the zip for your Mac from the
    [latest release](https://github.com/ReignBock/insta360py/releases/latest).
    Use `arm64` for Apple silicon (M1 and later) and `x86_64` for Intel Macs.
    Apple menu, About This Mac, shows which one you have.
 2. Open the zip and drag **Insta360 Markers** into your Applications folder.
-3. Open it. The app is not signed with an Apple developer certificate, so
-   macOS blocks the first launch. Open System Settings, choose Privacy &
-   Security, and click **Open Anyway** next to the message about Insta360
-   Markers. You do this once.
+3. Open it. macOS says it cannot verify the app. The message is about the
+   missing Apple developer signature, not about anything found in the app.
+   Open System Settings, choose Privacy & Security, and click **Open Anyway**
+   next to the message about Insta360 Markers. You do this once.
 
-Drop your `.insv` or `.lrv` files, or the folder that holds them, on the
-window. You can also use **Add Files** and **Add Folder**. Each recording
-lists its markers with the time in the video. **Copy** puts the list on the
+**Install with the script.** macOS does not warn, because the app is built on
+your Mac instead of downloaded. From a checkout of this repository, run:
+
+```bash
+tools/setup-mac.sh
+```
+
+The script creates **Insta360 Markers** in `~/Applications` and installs the
+commands described below.
+
+Drop your `.insv` or `.lrv` files, or a folder, on the window. You can also
+use **Add Files** and **Add Folder**. A folder is searched all the way down, so
+you can pick a whole memory card. The window shows each folder on the way to a
+recording, and leaves out folders with no footage. It skips hidden folders,
+such as the trash and Spotlight's index. Each recording lists its markers with
+the time in the video. **Copy** puts the list on the
 clipboard, and **Save** writes it to a text file.
 
 The window only reads your files. It does not change them, and it does not
-change Insta360 Studio projects.
-
-To build the app yourself, run `tools/build-app.sh` on a Mac. To get a
-launcher in `~/Applications` without downloading the zip, run
-`tools/setup-mac.sh` from a checkout. It also installs the commands below.
+change Insta360 Studio projects. To build the downloadable app yourself, run
+`tools/build-app.sh` on a Mac.
 
 ## Install
 
 Grab a wheel from the [latest release](https://github.com/ReignBock/insta360py/releases/latest):
 
 ```bash
-pip install insta360py-0.2.1-py3-none-any.whl
+pip install insta360py-0.3.0-py3-none-any.whl
 ```
 
 Or run straight from a tag, with nothing installed. `uvx` builds the tag in a
 cached environment and runs the command:
 
 ```bash
-uvx --from "git+https://github.com/ReignBock/insta360py@v0.2.1" insvtools --version
-uvx --from "git+https://github.com/ReignBock/insta360py@v0.2.1" insv-markers --help
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.3.0" insvtools --version
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.3.0" insv-markers --help
 ```
 
 To keep both commands on your PATH, use `uv tool install` with the same
@@ -244,7 +257,7 @@ Pushing a `v*` tag by hand still works, and is checked against
 
 ```bash
 uv sync --extra dev
-uv run pytest --cov                  # 237 tests, 100% coverage (enforced)
+uv run pytest --cov                  # 256 tests, 100% coverage (enforced)
 uv run pylint src tests tools
 uv run pyright
 ```

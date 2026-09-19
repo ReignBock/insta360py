@@ -35,11 +35,11 @@ from PySide6.QtWidgets import (
 # pylint: enable=no-name-in-module
 
 from .extractor import VIDEO_SUFFIXES, expand_paths, format_timestamp
-from .results import SessionResult, report_lines, scan
+from .results import FolderNode, SessionResult, group_by_folder, report_lines, scan
 
 APP_NAME = "Insta360 Markers"
 
-EMPTY_TEXT = "Drop .insv or .lrv files, or a folder of them, on this window."
+EMPTY_TEXT = "Drop .insv or .lrv files, or a folder, on this window. Folders are searched all the way down."
 VIDEO_FILTER = "Insta360 video (" + " ".join(f"*{suffix}" for suffix in VIDEO_SUFFIXES) + ")"
 
 
@@ -116,7 +116,13 @@ class MainWindow(QMainWindow):
             if path not in self._paths:
                 self._paths.append(path)
 
-        self._results = scan(expand_paths(self._paths))
+        # A large folder can take a while to walk; show that the app is busy.
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
+        try:
+            self._results = scan(expand_paths(self._paths, recursive=True))
+        finally:
+            QApplication.restoreOverrideCursor()
         self._refresh(searched=True)
 
     def choose_files(self) -> None:
@@ -182,7 +188,10 @@ class MainWindow(QMainWindow):
         """Redraw the list and the controls from the current results."""
         self._tree.clear()
 
-        for result in self._results:
+        folders, loose = group_by_folder(self._results, [path for path in self._paths if path.is_dir()])
+        for folder in folders:
+            self._tree.addTopLevelItem(self._folder_item(folder, top=True))
+        for result in loose:
             self._tree.addTopLevelItem(self._session_item(result))
         self._tree.expandAll()
 
@@ -205,6 +214,23 @@ class MainWindow(QMainWindow):
 
         count = sum(len(result.markers) for result in marked)
         return f"{_plural(count, 'marker')} in {_plural(len(self._results), 'recording')}."
+
+    @classmethod
+    def _folder_item(cls, folder: FolderNode, top: bool = False) -> QTreeWidgetItem:
+        """A folder's row, with its subfolders and recordings beneath it.
+
+        The folder that was searched shows its whole path, so it is clear where
+        the search started. The folders below it show only their names.
+        """
+        item = QTreeWidgetItem([str(folder.path) if top else folder.path.name])
+        item.setText(1, _plural(folder.recording_count, "recording"))
+
+        for subfolder in folder.folders:
+            item.addChild(cls._folder_item(subfolder))
+        for result in folder.sessions:
+            item.addChild(cls._session_item(result))
+
+        return item
 
     @staticmethod
     def _session_item(result: SessionResult) -> QTreeWidgetItem:

@@ -7,6 +7,7 @@ Nothing here is Windows-specific; the Studio half lives in
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,12 +41,39 @@ class Sequence:
     files: tuple[Path, ...]
 
 
-def expand_paths(paths: list[Path]) -> list[Path]:
-    """Resolve the arguments to video files, looking one level into folders."""
+def videos_below(folder: Path) -> list[Path]:
+    """Every video file in a folder and all the folders beneath it.
+
+    Hidden folders and files (a leading dot) are skipped. On a Mac drive those
+    are the trash, Spotlight's index and the ``._`` copies of each file, none
+    of which is footage. Order is depth first with names sorted, so a repeated
+    search of the same folder lists files the same way.
+    """
+    found: list[Path] = []
+
+    for directory, subdirectories, names in os.walk(folder):
+        subdirectories[:] = sorted(name for name in subdirectories if not name.startswith("."))
+        found.extend(
+            Path(directory, name)
+            for name in sorted(names)
+            if not name.startswith(".") and Path(name).suffix.lower() in VIDEO_SUFFIXES
+        )
+
+    return found
+
+
+def expand_paths(paths: list[Path], recursive: bool = False) -> list[Path]:
+    """Resolve the arguments to video files.
+
+    A folder contributes the video files directly inside it, or with
+    ``recursive`` every video file beneath it.
+    """
     found: list[Path] = []
 
     for path in paths:
-        if path.is_dir():
+        if path.is_dir() and recursive:
+            found.extend(videos_below(path))
+        elif path.is_dir():
             found.extend(
                 sorted(
                     child

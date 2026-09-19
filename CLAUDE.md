@@ -30,7 +30,7 @@ prefix each command with `uv run`:
 
 ```bash
 uv sync --extra dev
-uv run pytest --cov   # 237 tests; fails under 100% coverage (plain pytest does not measure it)
+uv run pytest --cov   # 256 tests; fails under 100% coverage (plain pytest does not measure it)
 uv run pylint src tests tools
 uv run pyright
 ```
@@ -257,8 +257,9 @@ ANCHORS, which the factory deliberately does not map to a class.
 ### `insvmarkers`
 
 `extractor.py` (sessions and markers, cross-platform), `results.py` (scans files
-into `SessionResult`s and renders the text report; shared by the CLI and the
-window, and free of Qt and printing), `studio.py` (the `.insprj` keyframe
+into `SessionResult`s, renders the text report, and arranges recordings under
+the folders searched with `group_by_folder`; shared by the CLI and the window,
+and free of Qt and printing), `studio.py` (the `.insprj` keyframe
 injection) and `gui.py` (the PySide6 window). Keep decisions about *what to
 show* in `results.py`; `gui.py` only arranges it on screen. Locating Studio's project is Windows-only, but
 everything that edits the JSON is plain data handling and is tested off
@@ -279,6 +280,15 @@ includes so the window is tested and counted toward coverage. Its tests run on
 Qt's offscreen platform (`tests/test_gui.py` sets `QT_QPA_PLATFORM` itself;
 do not export it in the shell, or the real window goes offscreen too). It
 reads files and never injects into Studio: injection is unverified.
+
+Folder search is recursive in the window only. `expand_paths(paths,
+recursive=True)` walks with `os.walk`, skips hidden folders and files (the
+trash, Spotlight's index and the `._` copies a Mac drive keeps), and lists
+files in sorted depth-first order. The CLI still calls it without `recursive`
+and looks one level deep. `find_sessions` keys on the session id, so a
+recording found in two folders is listed once, under the first folder seen.
+The window walks on the UI thread (a wait cursor, no cancel), so a very large
+folder freezes it until the walk ends.
 
 Two routes put it on a desktop:
 

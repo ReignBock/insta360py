@@ -3,6 +3,7 @@
 # pylint: disable=redefined-outer-name
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,8 @@ from insvmarkers import gui  # noqa: E402
 from insvmarkers.gui import EMPTY_TEXT, MainWindow  # noqa: E402
 
 # pylint: enable=wrong-import-position,no-name-in-module
+
+RESOURCES = Path(__file__).parent / "resources"
 
 
 @pytest.fixture(scope="module")
@@ -83,6 +86,7 @@ def test_a_folder_lists_the_markers_of_its_recording(window: MainWindow, session
     window.add_paths([session_dir])
 
     assert _rows(window) == [
+        [str(session_dir), "1 recording", ""],
         ["VID_20260620_173803 (2 files)", "3 markers", ""],
         ["Marker 01", "00:04:52", "292.60"],
         ["Marker 02", "00:18:13", "1093.76"],
@@ -165,7 +169,10 @@ def test_a_recording_without_markers_says_so(window: MainWindow, unmarked_sessio
     """An honest empty answer, and nothing to copy."""
     window.add_paths([unmarked_session])
 
-    assert _rows(window) == [["VID_20221218_231825 (1 file)", "No markers", ""]]
+    assert _rows(window) == [
+        [str(unmarked_session), "1 recording", ""],
+        ["VID_20221218_231825 (1 file)", "No markers", ""],
+    ]
     assert window._status.text() == "0 markers in 1 recording."  # pylint: disable=protected-access
     assert not window._copy.isEnabled()  # pylint: disable=protected-access
 
@@ -177,8 +184,8 @@ def test_an_unreadable_recording_reports_why(window: MainWindow, tmp_path: Path)
     window.add_paths([tmp_path])
 
     rows = _rows(window)
-    assert rows[0][1] == "Could not read"
-    assert "Base timestamp extraction failed" in rows[1][0]
+    assert rows[1][1] == "Could not read"
+    assert "Base timestamp extraction failed" in rows[2][0]
 
 
 def test_files_that_are_not_recordings_are_explained(window: MainWindow, tmp_path: Path) -> None:
@@ -288,7 +295,7 @@ def test_the_folder_dialog_adds_the_chosen_folder(
 
     window.choose_folder()
 
-    assert _rows(window)[0][0] == "VID_20260620_173803 (2 files)"
+    assert _rows(window)[1][0] == "VID_20260620_173803 (2 files)"
 
 
 def test_cancelling_the_folder_dialog_adds_nothing(
@@ -314,7 +321,7 @@ def test_main_shows_the_window_and_reads_the_paths_given(
     assert gui.main(["insv-markers-gui", str(session_dir)]) == 0
 
     assert len(opened) == 1
-    assert _rows(opened[0])[0][1] == "3 markers"
+    assert _rows(opened[0])[1][1] == "3 markers"
 
 
 def test_main_opens_empty_without_arguments(app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -326,3 +333,80 @@ def test_main_opens_empty_without_arguments(app: QApplication, monkeypatch: pyte
     assert gui.main(["insv-markers-gui"]) == 0
 
     assert not _rows(opened[0])
+
+
+def test_a_folder_search_shows_every_folder_on_the_way_to_the_footage(
+    window: MainWindow, nested_footage: Path
+) -> None:
+    """The searched folder shows its path, and each folder below shows its name."""
+    window.add_paths([nested_footage])
+
+    rows = _rows(window)
+
+    assert [row[0] for row in rows if not row[0].startswith("Marker")] == [
+        str(nested_footage),
+        "card1",
+        "DCIM",
+        "Camera01",
+        "VID_20260620_173803 (1 file)",
+        "card2",
+        "DCIM",
+        "Camera01",
+        "VID_20260621_090000 (1 file)",
+    ]
+    assert rows[0][1] == "2 recordings"
+    assert rows[1][1] == "1 recording"
+    assert window._status.text() == "6 markers in 2 recordings."  # pylint: disable=protected-access
+
+
+def test_folders_with_no_footage_do_not_appear(window: MainWindow, nested_footage: Path) -> None:
+    """The window lists the route to footage and nothing else."""
+    window.add_paths([nested_footage])
+
+    names = [row[0] for row in _rows(window)]
+
+    assert "Notes" not in names
+    assert "empty" not in names
+    assert ".Trashes" not in names
+
+
+def test_a_loose_file_is_listed_beside_a_searched_folder(
+    window: MainWindow, nested_footage: Path, tmp_path: Path
+) -> None:
+    """Files added one by one are not put under a folder they are not in."""
+    loose = tmp_path / "loose" / "VID_20260701_120000_00_029.insv"
+    loose.parent.mkdir()
+    shutil.copy(RESOURCES / "x5_indexed.insv", loose)
+
+    window.add_paths([nested_footage, loose])
+
+    tree = window._tree  # pylint: disable=protected-access
+    tops: list[str] = []
+    for index in range(tree.topLevelItemCount()):
+        item = tree.topLevelItem(index)
+        assert item is not None
+        tops.append(item.text(0))
+    assert tops == [str(nested_footage), "VID_20260701_120000 (1 file)"]
+
+
+def test_the_wait_cursor_is_restored_after_a_search(window: MainWindow, session_dir: Path) -> None:
+    """The busy cursor must not outlive the search."""
+    window.add_paths([session_dir])
+
+    assert QApplication.overrideCursor() is None
+
+
+def test_the_wait_cursor_is_restored_when_a_search_fails(
+    window: MainWindow, session_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An error mid-search still puts the normal cursor back."""
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(gui, "scan", fail)
+
+    with pytest.raises(RuntimeError):
+        window.add_paths([session_dir])
+
+    assert QApplication.overrideCursor() is None
