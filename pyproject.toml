@@ -44,6 +44,7 @@ test = [
     "pytest-cov",
     "PySide6-Essentials>=6.7", # the window is tested headless
     "cryptography>=42",        # the update tests build certificates and signatures
+    "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'", # see gui
 ]
 dev = [
     "insta360py[test]",
@@ -56,7 +57,16 @@ dev = [
 proto = ["grpcio-tools"]
 # The desktop window. PySide6-Essentials carries QtWidgets without the
 # add-on modules the full PySide6 wheel bundles.
-gui = ["PySide6-Essentials>=6.7", "cryptography>=42"]
+#
+# cryptography 49 stopped publishing wheels for Intel Macs. Without a wheel, pip
+# and uv build it from source, which needs a Rust toolchain, so an Intel Mac (and
+# the x86_64 app build) is held to 48, the last release with a universal2 wheel.
+# Remove the second line when the app no longer needs to run on Intel Macs.
+gui = [
+    "PySide6-Essentials>=6.7",
+    "cryptography>=42",
+    "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
 
 [project.scripts]
 insvtools = "insvtools.cli:main"
