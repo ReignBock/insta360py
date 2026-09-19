@@ -31,6 +31,7 @@
           dbus
           zstd
           libx11
+          krb5
 
           wayland
           libxcb
@@ -49,6 +50,7 @@
             git
             ffmpeg
             nodejs
+            openssl
             python313
           ];
 
