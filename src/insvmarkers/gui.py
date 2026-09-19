@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 
 from .extractor import VIDEO_SUFFIXES, expand_paths, format_timestamp
 from .results import FolderNode, SessionResult, group_by_folder, report_lines, scan
+from .updater import UpdateController, create as create_updater
 
 APP_NAME = "Insta360 Markers"
 
@@ -63,6 +64,7 @@ class MainWindow(QMainWindow):
 
         self._paths: list[Path] = []
         self._results: list[SessionResult] = []
+        self._updater: UpdateController | None = None
 
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["Recording", "Time", "Seconds"])
@@ -107,6 +109,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self._refresh()
+
+    def use_updater(self, controller: UpdateController) -> None:
+        """Give the window an updater: a Help menu, and a check now and daily."""
+        self._updater = controller
+        controller.attach_menu(self.menuBar())
+        controller.start()
 
     # Adding footage
 
@@ -260,6 +268,11 @@ def main(argv: list[str] | None = None) -> int:
     if len(arguments) > 1:
         window.add_paths([Path(argument) for argument in arguments[1:]])
     window.show()
+
+    # None unless this is the downloaded Mac app with the release authority certificate built in.
+    controller = create_updater(window)
+    if controller is not None:
+        window.use_updater(controller)
 
     return app.exec()
 

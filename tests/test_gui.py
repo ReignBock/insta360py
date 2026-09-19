@@ -410,3 +410,37 @@ def test_the_wait_cursor_is_restored_when_a_search_fails(
         window.add_paths([session_dir])
 
     assert QApplication.overrideCursor() is None
+
+
+def test_an_updater_adds_a_help_menu_and_starts(window: MainWindow) -> None:
+    """The window hands its menu bar to the updater and lets it start checking."""
+    calls: list[str] = []
+
+    class FakeUpdater:
+        """Records what the window asks of it."""
+
+        def attach_menu(self, menu_bar: object) -> None:
+            """Note the menu bar it was given."""
+            calls.append(f"menu:{menu_bar is window.menuBar()}")
+
+        def start(self) -> None:
+            """Note that checking began."""
+            calls.append("start")
+
+    window.use_updater(FakeUpdater())  # type: ignore[arg-type]
+
+    assert calls == ["menu:True", "start"]
+    assert window._updater is not None  # pylint: disable=protected-access
+
+
+def test_main_starts_the_updater_when_there_is_one(app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The downloaded app checks for updates as it opens."""
+    started: list[MainWindow] = []
+    monkeypatch.setattr(MainWindow, "show", lambda self: None)  # pylint: disable=unnecessary-lambda
+    monkeypatch.setattr(app, "exec", lambda: 0)
+    monkeypatch.setattr(gui, "create_updater", lambda window: window)
+    monkeypatch.setattr(MainWindow, "use_updater", lambda self, controller: started.append(controller))
+
+    assert gui.main(["insv-markers-gui"]) == 0
+
+    assert len(started) == 1
