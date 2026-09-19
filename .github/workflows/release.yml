@@ -22,6 +22,20 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
 
     steps:
+      # The Mac app's updater refuses anything unsigned, so a release made
+      # without the signing key would have no usable app. Fail before a tag
+      # exists, not after. The certificate is public and lives in the
+      # repository; check_setup.py below validates it. The same check runs
+      # again in macos-app.yml for manual runs.
+      - name: Check the signing key
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::RELEASE_SIGNING_KEY must be set to publish a release"
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -69,9 +83,18 @@ jobs:
       # stops test collection outright instead of skipping. Keep in step with
       # the same step in ci.yml.
       - name: Install Qt's runtime libraries
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libgssapi-krb5-2
 
       - run: pip install -e '.[dev]' build twine
+
+      # The app refuses every update if its revocation list has expired or the
+      # release certificate is revoked, expired or not from the authority, so a
+      # release built like that would be uninstallable. It also confirms the key
+      # secret belongs to the committed certificate. Fail before a tag exists.
+      - name: Check the revocation list, release certificate and key
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: python tools/check_setup.py
 
       # Never ship something the suite has not passed.
       - name: Run the full suite
@@ -124,5 +147,10 @@ jobs:
     name: Build the macOS apps
     needs: release
     uses: ./.github/workflows/macos-app.yml
+    secrets: inherit
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     with:
       tag: ${{ needs.release.outputs.tag }}

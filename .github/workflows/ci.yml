@@ -41,7 +41,7 @@ jobs:
       # these. Required, unlike ffmpeg: without Qt the window's tests skip and
       # the coverage gate fails.
       - name: Install Qt's runtime libraries
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libgssapi-krb5-2
 
       - run: pip install -e '.[dev]'
 

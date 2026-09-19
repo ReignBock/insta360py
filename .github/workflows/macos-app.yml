@@ -1,12 +1,21 @@
 name: macOS app
 
-# Builds the standalone Insta360 Markers app and, when given a release tag,
-# attaches the zips to that release. release.yml calls this after it
-# publishes: a release made with GITHUB_TOKEN does not start other workflows
-# by itself, so a `release: published` trigger would never fire.
+# Builds the standalone Insta360 Markers app, signs the zips with the release
+# key, and, when given a release tag, attaches them to that release.
+# release.yml calls this after it publishes: a release made with GITHUB_TOKEN
+# does not start other workflows by itself, so a `release: published` trigger
+# would never fire.
+#
+# The app's updater installs only zips signed by a certificate the release
+# authority issued, so a release without one is refused. The authority's own
+# certificate and the revocation list are in the repository, not secrets. The
+# secrets are:
+#   RELEASE_SIGNING_KEY   the release private key, as PEM text. The only secret.
+# Its certificate is public and is tools/pki/release.crt, issued by
+# tools/pki/issue-release-cert.sh.
 #
 # Run by hand from the Actions tab to try a build. Leave the tag empty and the
-# zips stay on the run as artifacts.
+# zips stay on the run as artifacts, unsigned if the secrets are not set.
 on:
   workflow_call:
     inputs:
@@ -14,6 +23,9 @@ on:
         description: Release tag to attach the apps to
         type: string
         required: true
+    secrets:
+      RELEASE_SIGNING_KEY:
+        required: false
   workflow_dispatch:
     inputs:
       tag:
@@ -23,6 +35,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   app:
@@ -37,7 +51,21 @@ jobs:
           - runner: macos-15-intel
             arch: x86_64
 
+    env:
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+
     steps:
+      # Checked first so a missing secret fails in seconds, not after a build.
+      - name: Check the signing key
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            if [ -n "${{ inputs.tag }}" ]; then
+              echo "::error::RELEASE_SIGNING_KEY must be set to publish a release"
+              exit 1
+            fi
+            echo "::warning::the signing key is not set; this build is unsigned and cannot be installed as an update"
+          fi
+
       - uses: actions/checkout@v7
         with:
           # An empty ref means the ref that started the run.
@@ -48,6 +76,8 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # build-app.sh builds the authority's certificate and the revocation list
+      # into the app.
       - name: Build the app
         run: tools/build-app.sh
 
@@ -67,13 +97,34 @@ jobs:
           fi
           kill "$PID"
 
+      # Runs the app's own check first: a wrong pairing, an expired or revoked
+      # certificate fails here and not on a user's Mac.
+      - name: Sign the zip
+        if: env.RELEASE_SIGNING_KEY != ''
+        run: uv run --no-dev --extra gui python tools/sign_release.py dist-app/*.zip
+
+      # Independent proof, checkable with `gh attestation verify`, that GitHub
+      # Actions built these zips from this repository.
+      - name: Attest the build
+        if: inputs.tag != ''
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist-app/*.zip
+
       - uses: actions/upload-artifact@v7
         with:
           name: Insta360-Markers-${{ matrix.arch }}
-          path: dist-app/*.zip
+          path: |
+            dist-app/*.zip
+            dist-app/*.zip.sig
+            dist-app/*.zip.crt
 
       - name: Attach to the release
         if: inputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.tag }}" dist-app/*.zip --clobber
+        run: |
+          # The authority's certificate lets anyone check a download by hand
+          # with tools/verify_release.py. Both architectures upload the same file.
+          gh release upload "${{ inputs.tag }}" dist-app/*.zip dist-app/*.zip.sig dist-app/*.zip.crt \
+            src/insvmarkers/release_ca.pem --clobber
