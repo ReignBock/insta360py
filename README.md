@@ -96,7 +96,7 @@ To check a download by hand, save the zip, its `.sig` and `.crt` files and
 
 ```bash
 uv run --with cryptography python tools/verify_release.py \
-    Insta360-Markers-0.3.0-arm64.zip --authority release_ca.pem
+    Insta360-Markers-0.4.1-arm64.zip --authority release_ca.pem
 ```
 
 It prints `valid` when the zip may be installed. `tools/pki/README.md`
@@ -110,15 +110,15 @@ GitHub Actions built the zips from this repository. Check it with
 Grab a wheel from the [latest release](https://github.com/ReignBock/insta360py/releases/latest):
 
 ```bash
-pip install insta360py-0.3.0-py3-none-any.whl
+pip install insta360py-0.4.1-py3-none-any.whl
 ```
 
 Or run straight from a tag, with nothing installed. `uvx` builds the tag in a
 cached environment and runs the command:
 
 ```bash
-uvx --from "git+https://github.com/ReignBock/insta360py@v0.3.0" insvtools --version
-uvx --from "git+https://github.com/ReignBock/insta360py@v0.3.0" insv-markers --help
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.4.1" insvtools --version
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.4.1" insv-markers --help
 ```
 
 To keep both commands on your PATH, use `uv tool install` with the same
