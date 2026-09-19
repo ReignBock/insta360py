@@ -37,6 +37,11 @@ uv run pyright
 
 Run a single test or file with `uv run pytest tests/test_mp4_writer.py::test_name`.
 
+The `test` extra is what running the tests needs (pytest, Qt, cryptography); `dev`
+adds the linters on top. The CI sdist check installs `test`, so the whole suite
+runs from the unpacked sdist. A test dependency belongs in `test`, and a test
+module should never be excluded from collection because one is missing.
+
 Three gates, all currently clean, all expected to stay that way:
 
 - **pytest at 100% coverage**, enforced by `fail_under = 100` when run with `--cov` (CI does). New code arrives

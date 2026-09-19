@@ -116,14 +116,19 @@ jobs:
           /tmp/wheel-check/bin/insvtools --version
           /tmp/wheel-check/bin/insv-markers --help > /dev/null
 
+      # The test extra brings in Qt and cryptography, and Qt needs its runtime
+      # libraries. Keep the apt line in step with the test job.
+      - name: Install Qt's runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libgssapi-krb5-2
+
       # setuptools' default sdist omits conftest.py and the fixtures, which
       # leaves the tests unrunnable. MANIFEST.in fixes that, and this is what
-      # keeps it fixed.
+      # keeps it fixed. It runs the whole suite, as a contributor would.
       - name: Run the test suite from the unpacked sdist
         run: |
           mkdir -p /tmp/sdist && tar xzf dist/*.tar.gz -C /tmp/sdist --strip-components=1
           python -m venv /tmp/sdist-check
-          /tmp/sdist-check/bin/pip install pytest pytest-cov /tmp/sdist
+          /tmp/sdist-check/bin/pip install "/tmp/sdist[test]"
           cd /tmp/sdist && /tmp/sdist-check/bin/python -m pytest -q
 
       - uses: actions/upload-artifact@v7

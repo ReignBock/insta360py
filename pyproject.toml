@@ -37,14 +37,19 @@ Source = "https://github.com/ReignBock/insta360py"
 Issues = "https://github.com/ReignBock/insta360py/issues"
 
 [project.optional-dependencies]
-dev = [
+# What running the tests needs, and nothing else. The unpacked-sdist check in CI
+# installs exactly this, so a test dependency added here is exercised there too.
+test = [
     "pytest>=8",
     "pytest-cov",
+    "PySide6-Essentials>=6.7", # the window is tested headless
+    "cryptography>=42",        # the update tests build certificates and signatures
+]
+dev = [
+    "insta360py[test]",
     "pylint>=3",
     "pylint-protobuf",        # teaches pylint the generated ExtraMetadata fields
     "pyright>=1.1.400",       # type checker; the engine behind VS Code's Pylance
-    "PySide6-Essentials>=6.7", # the window is tested headless; keep in step with the gui extra
-    "cryptography>=42",       # verifies update signatures; keep in step with the gui extra
 ]
 # Only needed to regenerate the protobuf bindings, which are committed. Kept
 # out of `dev` because it is a large download that no ordinary change needs.

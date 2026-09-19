@@ -401,22 +401,29 @@ gui = [
 proto = [
     { name = "grpcio-tools" },
 ]
+test = [
+    { name = "cryptography" },
+    { name = "pyside6-essentials" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
 
 [package.metadata]
 requires-dist = [
-    { name = "cryptography", marker = "extra == 'dev'", specifier = ">=42" },
     { name = "cryptography", marker = "extra == 'gui'", specifier = ">=42" },
+    { name = "cryptography", marker = "extra == 'test'", specifier = ">=42" },
     { name = "grpcio-tools", marker = "extra == 'proto'" },
+    { name = "insta360py", extras = ["test"], marker = "extra == 'dev'" },
     { name = "protobuf", specifier = ">=4.25" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3" },
     { name = "pylint-protobuf", marker = "extra == 'dev'" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.400" },
-    { name = "pyside6-essentials", marker = "extra == 'dev'", specifier = ">=6.7" },
     { name = "pyside6-essentials", marker = "extra == 'gui'", specifier = ">=6.7" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytest-cov", marker = "extra == 'dev'" },
+    { name = "pyside6-essentials", marker = "extra == 'test'", specifier = ">=6.7" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
+    { name = "pytest-cov", marker = "extra == 'test'" },
 ]
-provides-extras = ["dev", "proto", "gui"]
+provides-extras = ["test", "dev", "proto", "gui"]
 
 [[package]]
 name = "isort"
