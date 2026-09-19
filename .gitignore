@@ -149,7 +149,6 @@ activemq-data/
 
 # Environments
 .env
-.envrc
 .venv
 env/
 venv/
@@ -216,3 +215,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+.direnv
+
+dist-app/
+build-app/
+
+# The app build spec is source, not a PyInstaller by-product.
+!tools/app.spec

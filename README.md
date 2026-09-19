@@ -26,6 +26,33 @@ frame types nobody has documented.
 - Python 3.12+
 - `ffmpeg` — only needed to run the test suite
 
+## Mac app
+
+The Mac app shows the markers of your Insta360 footage in a window. You
+install nothing else.
+
+1. Download the zip for your Mac from the
+   [latest release](https://github.com/ReignBock/insta360py/releases/latest).
+   Use `arm64` for Apple silicon (M1 and later) and `x86_64` for Intel Macs.
+   Apple menu, About This Mac, shows which one you have.
+2. Open the zip and drag **Insta360 Markers** into your Applications folder.
+3. Open it. The app is not signed with an Apple developer certificate, so
+   macOS blocks the first launch. Open System Settings, choose Privacy &
+   Security, and click **Open Anyway** next to the message about Insta360
+   Markers. You do this once.
+
+Drop your `.insv` or `.lrv` files, or the folder that holds them, on the
+window. You can also use **Add Files** and **Add Folder**. Each recording
+lists its markers with the time in the video. **Copy** puts the list on the
+clipboard, and **Save** writes it to a text file.
+
+The window only reads your files. It does not change them, and it does not
+change Insta360 Studio projects.
+
+To build the app yourself, run `tools/build-app.sh` on a Mac. To get a
+launcher in `~/Applications` without downloading the zip, run
+`tools/setup-mac.sh` from a checkout. It also installs the commands below.
+
 ## Install
 
 Grab a wheel from the [latest release](https://github.com/ReignBock/insta360py/releases/latest):
@@ -34,20 +61,72 @@ Grab a wheel from the [latest release](https://github.com/ReignBock/insta360py/r
 pip install insta360py-0.1.0-py3-none-any.whl
 ```
 
-Or install straight from a tag:
+Or run straight from a tag, with nothing installed. `uvx` builds the tag in a
+cached environment and runs the command:
 
 ```bash
-pip install "git+https://github.com/ReignBock/insta360py@v0.1.0"
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.1.0" insvtools --version
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.1.0" insv-markers --help
 ```
+
+To keep both commands on your PATH, use `uv tool install` with the same
+`git+` URL.
 
 Or from a checkout:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install .
+uv tool install .
 ```
 
-Any of these gives you two commands, `insvtools` and `insv-markers`.
+Each of these provides two commands, `insvtools` and `insv-markers`. The
+desktop window is an optional extra: add `[gui]` to any of the installs above
+to get a third command, `insv-markers-gui`.
+
+### Open the window with uv
+
+`insv-markers-gui` opens the window. With [uv](https://docs.astral.sh/uv/) you
+do not need to install anything first. uv fetches a suitable Python and Qt on
+the first run.
+
+From a checkout:
+
+```bash
+uv run --extra gui insv-markers-gui
+uv run --extra gui insv-markers-gui /path/to/DCIM    # open with footage loaded
+```
+
+Straight from GitHub, with no checkout:
+
+```bash
+uvx --from "insta360py[gui] @ git+https://github.com/ReignBock/insta360py@main" insv-markers-gui
+```
+
+Replace `main` with a release tag to pin a version. The window ships in
+releases after 0.1.0, so `v0.1.0` does not have it.
+
+To keep the command on your PATH, install it once and run it by name:
+
+```bash
+uv tool install ".[gui]"
+insv-markers-gui
+```
+
+### macOS
+
+macOS ships Python 3.9, and this project needs 3.12 or newer. From a checkout,
+one script handles it:
+
+```bash
+tools/setup-mac.sh          # install the commands and the desktop app
+tools/setup-mac.sh --dev    # also set up the development environment
+```
+
+The script installs [uv](https://docs.astral.sh/uv/) into `~/.local/bin` if
+it is missing. uv downloads a suitable Python and installs the package. The
+plain install needs no sudo. With `--dev` the script also installs ffmpeg
+through Homebrew, and installs Homebrew first when it is missing. Homebrew's
+installer runs sudo and prompts for your password. Without ffmpeg, two tests
+skip.
 
 This is not on PyPI.
 
@@ -134,8 +213,7 @@ files it produces cannot be read by the original Java tool at all.
 ## Building a package
 
 ```bash
-.venv/bin/pip install build
-.venv/bin/python -m build          # -> dist/*.whl and dist/*.tar.gz
+uv build               # -> dist/*.whl and dist/*.tar.gz
 ```
 
 That is the whole story: a pure-Python wheel, no compile step, no platform
@@ -165,10 +243,10 @@ Pushing a `v*` tag by hand still works, and is checked against
 ## Development
 
 ```bash
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                      # 216 tests, 100% coverage (enforced)
-.venv/bin/pylint src tests tools
-.venv/bin/pyright
+uv sync --extra dev
+uv run pytest --cov                  # 237 tests, 100% coverage (enforced)
+uv run pylint src tests tools
+uv run pyright
 ```
 
 Fidelity is checked against reference output from the original Java tool,

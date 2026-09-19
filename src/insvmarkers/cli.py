@@ -12,14 +12,8 @@ import logging
 import sys
 from pathlib import Path
 
-from .extractor import (
-    Sequence,
-    expand_paths,
-    find_sessions,
-    format_timestamp,
-    sequence_for,
-    session_markers,
-)
+from .extractor import expand_paths, format_timestamp
+from .results import SessionResult, report_lines, scan
 from .studio import StudioError, find_project_for_session, find_projects_dir, inject_keyframes
 
 logger = logging.getLogger(__name__)
@@ -63,31 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _report(sequence: Sequence, markers: list[float]) -> None:
-    print(f"\nSequence: {sequence.prefix}_{sequence.session_id} ({len(sequence.files)} files)")
+def _report(result: SessionResult) -> None:
+    print(f"\nSequence: {result.title} ({len(result.sequence.files)} files)")
     print("-" * 40)
 
-    for index, seconds in enumerate(markers, start=1):
+    for index, seconds in enumerate(result.markers, start=1):
         print(f"Marker {index:02d} : {format_timestamp(seconds)}")
-
-
-def _file_lines(sequence: Sequence, markers: list[float]) -> list[str]:
-    """The same report, plus the raw seconds each timestamp was rounded from.
-
-    The console keeps upstream's HH:MM:SS; a file to check times against is
-    more use with the position it came from, since the display truncates.
-    """
-    lines = [
-        f"Sequence: {sequence.prefix}_{sequence.session_id} ({len(sequence.files)} files)",
-        "-" * 40,
-    ]
-    lines += [
-        f"Marker {index:02d} : {format_timestamp(seconds)}   {seconds:10.2f}s"
-        for index, seconds in enumerate(markers, start=1)
-    ]
-    lines.append("")
-
-    return lines
 
 
 def _write_report(path: Path, lines: list[str]) -> None:
@@ -101,12 +76,12 @@ def _write_report(path: Path, lines: list[str]) -> None:
     print(f"\n[+] Wrote markers to {path}")
 
 
-def _inject(sequence: Sequence, markers: list[float], projects_dir: Path | None) -> None:
+def _inject(result: SessionResult, projects_dir: Path | None) -> None:
     """Add the markers to Studio's project, reporting why if that is not possible."""
     try:
         directory = projects_dir if projects_dir is not None else find_projects_dir()
-        project = find_project_for_session(directory, sequence.session_id)
-        added = inject_keyframes(project, markers)
+        project = find_project_for_session(directory, result.sequence.session_id)
+        added = inject_keyframes(project, list(result.markers))
     except StudioError as error:
         print(f"[i] Studio Project: {error}")
         return
@@ -133,34 +108,25 @@ def main(argv: list[str] | None = None) -> int:
         print("No .insv or .lrv files found.", file=sys.stderr)
         return 1
 
-    sessions = find_sessions(files)
     without_markers = 0
     report: list[str] = []
 
-    for session_id, directory in sessions.items():
-        sequence = sequence_for(session_id, directory)
-
-        if sequence is None:
-            logger.debug("No sequence files for session %s", session_id)
-            continue
-
-        try:
-            markers = session_markers(sequence)
-        except ValueError as error:
-            print(f"\nSequence: {sequence.prefix}_{session_id}")
+    for result in scan(files):
+        if result.error is not None:
+            print(f"\nSequence: {result.title}")
             print("-" * 40)
-            print(f"Error: {error}", file=sys.stderr)
+            print(f"Error: {result.error}", file=sys.stderr)
             continue
 
-        if not markers:
+        if not result.markers:
             without_markers += 1
             continue
 
-        _report(sequence, markers)
-        report.extend(_file_lines(sequence, markers))
+        _report(result)
+        report.extend(report_lines(result))
 
         if args.inject:
-            _inject(sequence, markers, args.projects_dir)
+            _inject(result, args.projects_dir)
 
     if without_markers:
         print(f"\n[i] No markers found in {without_markers} sequence(s).")
