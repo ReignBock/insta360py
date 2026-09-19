@@ -57,6 +57,12 @@ def _rows(window: MainWindow) -> list[list[str]]:
     return rows
 
 
+def _settle(window: MainWindow) -> None:
+    """Let the window read every recording it has queued."""
+    while window.reading:
+        QApplication.processEvents()
+
+
 def _drop(window: MainWindow, paths: list[Path]) -> None:
     """Deliver a drop of local files to the window."""
     mime = QMimeData()
@@ -84,6 +90,7 @@ def test_a_new_window_asks_for_footage(window: MainWindow) -> None:
 def test_a_folder_lists_the_markers_of_its_recording(window: MainWindow, session_dir: Path) -> None:
     """One recording of two chapters, with its three markers under it."""
     window.add_paths([session_dir])
+    _settle(window)
 
     assert _rows(window) == [
         [str(session_dir), "1 recording", ""],
@@ -100,6 +107,7 @@ def test_a_folder_lists_the_markers_of_its_recording(window: MainWindow, session
 def test_a_dropped_file_is_read(window: MainWindow, x5_insv: Path) -> None:
     """Dropping one chapter reports the whole recording it belongs to."""
     _drop(window, [x5_insv])
+    _settle(window)
 
     assert _rows(window)[0][1] == "3 markers"
 
@@ -160,7 +168,9 @@ def test_a_drop_of_something_that_is_not_local_is_ignored(window: MainWindow) ->
 def test_adding_the_same_footage_twice_lists_it_once(window: MainWindow, session_dir: Path) -> None:
     """Dropping a file after its folder must not repeat the recording."""
     window.add_paths([session_dir])
+    _settle(window)
     window.add_paths([session_dir, session_dir / "VID_20260620_173803_00_029.insv"])
+    _settle(window)
 
     assert sum(1 for row in _rows(window) if row[0].startswith("VID_")) == 1
 
@@ -168,6 +178,7 @@ def test_adding_the_same_footage_twice_lists_it_once(window: MainWindow, session
 def test_a_recording_without_markers_says_so(window: MainWindow, unmarked_session: Path) -> None:
     """An honest empty answer, and nothing to copy."""
     window.add_paths([unmarked_session])
+    _settle(window)
 
     assert _rows(window) == [
         [str(unmarked_session), "1 recording", ""],
@@ -182,6 +193,7 @@ def test_an_unreadable_recording_reports_why(window: MainWindow, tmp_path: Path)
     (tmp_path / "VID_20260620_173803_00_029.insv").write_bytes(b"\x00" * 200)
 
     window.add_paths([tmp_path])
+    _settle(window)
 
     rows = _rows(window)
     assert rows[1][1] == "Could not read"
@@ -193,6 +205,7 @@ def test_files_that_are_not_recordings_are_explained(window: MainWindow, tmp_pat
     (tmp_path / "clip.insv").write_bytes(b"\x00" * 200)
 
     window.add_paths([tmp_path])
+    _settle(window)
 
     assert not _rows(window)
     assert window._status.text().startswith("No recordings found.")  # pylint: disable=protected-access
@@ -202,6 +215,7 @@ def test_files_that_are_not_recordings_are_explained(window: MainWindow, tmp_pat
 def test_clear_empties_the_window(window: MainWindow, session_dir: Path) -> None:
     """Back to the starting state."""
     window.add_paths([session_dir])
+    _settle(window)
 
     window.clear()
 
@@ -213,6 +227,7 @@ def test_clear_empties_the_window(window: MainWindow, session_dir: Path) -> None
 def test_the_report_matches_the_command_line_file(window: MainWindow, session_dir: Path) -> None:
     """The same text as ``insv-markers -o``, raw seconds included."""
     window.add_paths([session_dir])
+    _settle(window)
 
     text = window.report_text()
 
@@ -223,6 +238,7 @@ def test_the_report_matches_the_command_line_file(window: MainWindow, session_di
 def test_copy_puts_the_report_on_the_clipboard(window: MainWindow, session_dir: Path) -> None:
     """Copy hands the same text to the clipboard."""
     window.add_paths([session_dir])
+    _settle(window)
 
     window.copy_report()
 
@@ -238,6 +254,7 @@ def test_save_writes_the_report(
     target.parent.mkdir()
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_a, **_k: (str(target), ""))
     window.add_paths([session_dir])
+    _settle(window)
 
     window.save_report()
 
@@ -251,6 +268,7 @@ def test_cancelling_save_writes_nothing(
     """An empty name from the dialog means the user backed out."""
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *_a, **_k: ("", ""))
     window.add_paths([session_dir])
+    _settle(window)
     before = window._status.text()  # pylint: disable=protected-access
 
     window.save_report()
@@ -269,6 +287,7 @@ def test_a_failed_save_warns_the_user(
     )
     monkeypatch.setattr(QMessageBox, "warning", lambda _parent, _title, text: shown.append(text))
     window.add_paths([session_dir])
+    _settle(window)
 
     window.save_report()
 
@@ -283,6 +302,7 @@ def test_the_file_dialog_adds_the_chosen_files(
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *_a, **_k: ([str(x5_insv)], ""))
 
     window.choose_files()
+    _settle(window)
 
     assert _rows(window)[0][1] == "3 markers"
 
@@ -294,6 +314,7 @@ def test_the_folder_dialog_adds_the_chosen_folder(
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_a, **_k: str(session_dir))
 
     window.choose_folder()
+    _settle(window)
 
     assert _rows(window)[1][0] == "VID_20260620_173803 (2 files)"
 
@@ -305,6 +326,7 @@ def test_cancelling_the_folder_dialog_adds_nothing(
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_a, **_k: "")
 
     window.choose_folder()
+    _settle(window)
 
     assert not _rows(window)
     assert window._status.text() == ""  # pylint: disable=protected-access
@@ -321,6 +343,7 @@ def test_main_shows_the_window_and_reads_the_paths_given(
     assert gui.main(["insv-markers-gui", str(session_dir)]) == 0
 
     assert len(opened) == 1
+    _settle(opened[0])
     assert _rows(opened[0])[1][1] == "3 markers"
 
 
@@ -340,6 +363,7 @@ def test_a_folder_search_shows_every_folder_on_the_way_to_the_footage(
 ) -> None:
     """The searched folder shows its path, and each folder below shows its name."""
     window.add_paths([nested_footage])
+    _settle(window)
 
     rows = _rows(window)
 
@@ -362,6 +386,7 @@ def test_a_folder_search_shows_every_folder_on_the_way_to_the_footage(
 def test_folders_with_no_footage_do_not_appear(window: MainWindow, nested_footage: Path) -> None:
     """The window lists the route to footage and nothing else."""
     window.add_paths([nested_footage])
+    _settle(window)
 
     names = [row[0] for row in _rows(window)]
 
@@ -379,6 +404,7 @@ def test_a_loose_file_is_listed_beside_a_searched_folder(
     shutil.copy(RESOURCES / "x5_indexed.insv", loose)
 
     window.add_paths([nested_footage, loose])
+    _settle(window)
 
     tree = window._tree  # pylint: disable=protected-access
     tops: list[str] = []
@@ -392,6 +418,7 @@ def test_a_loose_file_is_listed_beside_a_searched_folder(
 def test_the_wait_cursor_is_restored_after_a_search(window: MainWindow, session_dir: Path) -> None:
     """The busy cursor must not outlive the search."""
     window.add_paths([session_dir])
+    _settle(window)
 
     assert QApplication.overrideCursor() is None
 
@@ -404,12 +431,79 @@ def test_the_wait_cursor_is_restored_when_a_search_fails(
     def fail(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("disk gone")
 
-    monkeypatch.setattr(gui, "scan", fail)
+    monkeypatch.setattr(gui, "find_recordings", fail)
 
     with pytest.raises(RuntimeError):
         window.add_paths([session_dir])
 
     assert QApplication.overrideCursor() is None
+
+
+def test_the_folders_are_listed_before_any_recording_is_read(window: MainWindow, session_dir: Path) -> None:
+    """The structure shows at once, each recording marked as reading."""
+    window.add_paths([session_dir])
+
+    assert window.reading
+    assert _rows(window)[1] == ["VID_20260620_173803 (2 files)", "Reading…", ""]
+    assert "0 of 1 recording" in window._status.text()  # pylint: disable=protected-access
+    assert not window._copy.isEnabled()  # pylint: disable=protected-access
+
+    _settle(window)
+
+    assert _rows(window)[1][1] == "3 markers"
+    assert window._copy.isEnabled()  # pylint: disable=protected-access
+
+
+def test_recordings_are_read_one_at_a_time(window: MainWindow, nested_footage: Path, tmp_path: Path) -> None:
+    """Each event-loop turn reads one recording, so the window keeps responding."""
+    shutil.copy(RESOURCES / "x5_indexed.insv", tmp_path / "VID_20260701_120000_00_001.insv")
+    window.add_paths([nested_footage, tmp_path])
+    total = len(window._results)  # pylint: disable=protected-access
+    assert total > 1
+
+    window._read_next()  # pylint: disable=protected-access
+
+    assert window.reading
+    assert f"1 of {total} recordings" in window._status.text()  # pylint: disable=protected-access
+
+
+def test_adding_more_footage_keeps_what_was_already_read(
+    window: MainWindow, session_dir: Path, x5_insv: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finished recording is not read again when the list is rebuilt."""
+    window.add_paths([session_dir])
+    _settle(window)
+    calls: list[object] = []
+    real = gui.read_session
+
+    def counting(sequence: object) -> object:
+        calls.append(sequence)
+        return real(sequence)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(gui, "read_session", counting)
+
+    window.add_paths([x5_insv])
+    _settle(window)
+
+    assert not calls
+
+
+def test_clearing_stops_the_reading(window: MainWindow, session_dir: Path) -> None:
+    """Nothing is read after Clear, and nothing comes back."""
+    window.add_paths([session_dir])
+
+    window.clear()
+    _settle(window)
+
+    assert not window.reading
+    assert not _rows(window)
+
+
+def test_reading_with_nothing_queued_does_nothing(window: MainWindow) -> None:
+    """A timer that fires after Clear finds no work."""
+    window._read_next()  # pylint: disable=protected-access
+
+    assert not _rows(window)
 
 
 def test_an_updater_adds_a_help_menu_and_starts(window: MainWindow) -> None:

@@ -27,11 +27,14 @@ class SessionResult:
 
     ``error`` is set when the session could not be read, and then ``markers``
     is empty. A session with no error and no markers simply has none.
+    ``pending`` marks a session that was found but not read yet; its markers
+    are empty until :func:`read_session` replaces it.
     """
 
     sequence: Sequence
     markers: tuple[float, ...]
     error: str | None = None
+    pending: bool = False
 
     @property
     def title(self) -> str:
@@ -39,13 +42,13 @@ class SessionResult:
         return f"{self.sequence.prefix}_{self.sequence.session_id}"
 
 
-def scan(files: list[Path]) -> list[SessionResult]:
-    """Read the markers of every session the video files belong to.
+def find_recordings(files: list[Path]) -> list[SessionResult]:
+    """List the sessions the video files belong to, without reading any of them.
 
-    Pass the output of :func:`insvmarkers.extractor.expand_paths`. Sessions come
-    back in the order their files were found.
+    Pass the output of :func:`insvmarkers.extractor.expand_paths`. Each result is
+    pending. Sessions come back in the order their files were found.
     """
-    results: list[SessionResult] = []
+    found: list[SessionResult] = []
 
     for session_id, directory in find_sessions(files).items():
         sequence = sequence_for(session_id, directory)
@@ -54,15 +57,22 @@ def scan(files: list[Path]) -> list[SessionResult]:
             logger.debug("No sequence files for session %s", session_id)
             continue
 
-        try:
-            markers = tuple(session_markers(sequence))
-        except ValueError as error:
-            results.append(SessionResult(sequence, (), str(error)))
-            continue
+        found.append(SessionResult(sequence, (), pending=True))
 
-        results.append(SessionResult(sequence, markers))
+    return found
 
-    return results
+
+def read_session(sequence: Sequence) -> SessionResult:
+    """Read the markers of one session."""
+    try:
+        return SessionResult(sequence, tuple(session_markers(sequence)))
+    except ValueError as error:
+        return SessionResult(sequence, (), str(error))
+
+
+def scan(files: list[Path]) -> list[SessionResult]:
+    """Read the markers of every session the video files belong to."""
+    return [read_session(found.sequence) for found in find_recordings(files)]
 
 
 def report_lines(result: SessionResult) -> list[str]:

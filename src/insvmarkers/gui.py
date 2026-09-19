@@ -15,7 +15,7 @@ from pathlib import Path
 
 # pylint reads no compiled extensions, so it cannot see Qt's names.
 # pylint: disable=no-name-in-module
-from PySide6.QtCore import QMimeData, Qt
+from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -34,8 +34,15 @@ from PySide6.QtWidgets import (
 
 # pylint: enable=no-name-in-module
 
-from .extractor import VIDEO_SUFFIXES, expand_paths, format_timestamp
-from .results import FolderNode, SessionResult, group_by_folder, report_lines, scan
+from .extractor import VIDEO_SUFFIXES, Sequence, expand_paths, format_timestamp
+from .results import (
+    FolderNode,
+    SessionResult,
+    find_recordings,
+    group_by_folder,
+    read_session,
+    report_lines,
+)
 from .updater import UpdateController, create as create_updater
 
 APP_NAME = "Insta360 Markers"
@@ -53,7 +60,7 @@ def _local_paths(mime: QMimeData) -> list[Path]:
     return [Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()]
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow):  # pylint: disable=too-many-instance-attributes  # a window holds its widgets
     """The one window of the app."""
 
     def __init__(self) -> None:
@@ -63,7 +70,14 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self._paths: list[Path] = []
-        self._results: list[SessionResult] = []
+        # Every recording found, in the order shown. Pending ones are read one
+        # at a time from the event loop, so the window stays responsive.
+        self._results: dict[Sequence, SessionResult] = {}
+        self._items: dict[Sequence, QTreeWidgetItem] = {}
+        self._queue: list[Sequence] = []
+        self._reader = QTimer(self)
+        self._reader.setSingleShot(True)
+        self._reader.timeout.connect(self._read_next)
         self._updater: UpdateController | None = None
 
         self._tree = QTreeWidget()
@@ -119,19 +133,48 @@ class MainWindow(QMainWindow):
     # Adding footage
 
     def add_paths(self, paths: list[Path]) -> None:
-        """Add files or folders, then read every recording they belong to."""
+        """Add files or folders, list the recordings they hold, then read each in turn.
+
+        The list appears as soon as the folders are walked, with every
+        recording marked as reading. Recordings read earlier keep their result.
+        """
         for path in paths:
             if path not in self._paths:
                 self._paths.append(path)
 
-        # A large folder can take a while to walk; show that the app is busy.
+        # Walking a large folder can take a while; show that the app is busy.
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QApplication.processEvents()
         try:
-            self._results = scan(expand_paths(self._paths, recursive=True))
+            found = find_recordings(expand_paths(self._paths, recursive=True))
         finally:
             QApplication.restoreOverrideCursor()
+
+        self._reader.stop()
+        done = {sequence: result for sequence, result in self._results.items() if not result.pending}
+        self._results = {entry.sequence: done.get(entry.sequence, entry) for entry in found}
+        self._queue = [sequence for sequence, result in self._results.items() if result.pending]
         self._refresh(searched=True)
+        self._reader.start(0)
+
+    @property
+    def reading(self) -> bool:
+        """Whether recordings are still waiting to be read."""
+        return bool(self._queue)
+
+    def _read_next(self) -> None:
+        """Read the next waiting recording and update its row."""
+        if not self._queue:
+            return
+
+        sequence = self._queue.pop(0)
+        result = read_session(sequence)
+        self._results[sequence] = result
+        self._fill_session(self._items[sequence], result)
+        self._update_controls(searched=True)
+
+        if self._queue:
+            self._reader.start(0)
 
     def choose_files(self) -> None:
         """Ask for video files."""
@@ -146,8 +189,10 @@ class MainWindow(QMainWindow):
 
     def clear(self) -> None:
         """Forget everything added so far."""
+        self._reader.stop()
+        self._queue.clear()
         self._paths.clear()
-        self._results = []
+        self._results = {}
         self._refresh()
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # pylint: disable=invalid-name
@@ -165,7 +210,7 @@ class MainWindow(QMainWindow):
     def report_text(self) -> str:
         """The markers of every recording that has any, as plain text."""
         lines: list[str] = []
-        for result in self._results:
+        for result in self._results.values():
             if result.markers:
                 lines += report_lines(result)
 
@@ -195,15 +240,20 @@ class MainWindow(QMainWindow):
     def _refresh(self, searched: bool = False) -> None:
         """Redraw the list and the controls from the current results."""
         self._tree.clear()
+        self._items = {}
 
-        folders, loose = group_by_folder(self._results, [path for path in self._paths if path.is_dir()])
+        results = list(self._results.values())
+        folders, loose = group_by_folder(results, [path for path in self._paths if path.is_dir()])
         for folder in folders:
             self._tree.addTopLevelItem(self._folder_item(folder, top=True))
         for result in loose:
             self._tree.addTopLevelItem(self._session_item(result))
         self._tree.expandAll()
+        self._update_controls(searched)
 
-        marked = [result for result in self._results if result.markers]
+    def _update_controls(self, searched: bool) -> None:
+        """Set the buttons and the status line from the current results."""
+        marked = [result for result in self._results.values() if result.markers]
         has_report = bool(marked)
 
         self._pages.setCurrentWidget(self._tree if self._results else self._empty)
@@ -220,11 +270,14 @@ class MainWindow(QMainWindow):
         if not self._results:
             return "No recordings found. Check that the files are .insv or .lrv files from the camera."
 
+        if self._queue:
+            read = len(self._results) - len(self._queue)
+            return f"Reading markers: {read} of {_plural(len(self._results), 'recording')} done."
+
         count = sum(len(result.markers) for result in marked)
         return f"{_plural(count, 'marker')} in {_plural(len(self._results), 'recording')}."
 
-    @classmethod
-    def _folder_item(cls, folder: FolderNode, top: bool = False) -> QTreeWidgetItem:
+    def _folder_item(self, folder: FolderNode, top: bool = False) -> QTreeWidgetItem:
         """A folder's row, with its subfolders and recordings beneath it.
 
         The folder that was searched shows its whole path, so it is clear where
@@ -234,18 +287,28 @@ class MainWindow(QMainWindow):
         item.setText(1, _plural(folder.recording_count, "recording"))
 
         for subfolder in folder.folders:
-            item.addChild(cls._folder_item(subfolder))
+            item.addChild(self._folder_item(subfolder))
         for result in folder.sessions:
-            item.addChild(cls._session_item(result))
+            item.addChild(self._session_item(result))
+
+        return item
+
+    def _session_item(self, result: SessionResult) -> QTreeWidgetItem:
+        """A recording's row, filled in now if it has been read."""
+        item = QTreeWidgetItem([f"{result.title} ({_plural(len(result.sequence.files), 'file')})"])
+        self._items[result.sequence] = item
+        self._fill_session(item, result)
 
         return item
 
     @staticmethod
-    def _session_item(result: SessionResult) -> QTreeWidgetItem:
-        """A recording's row, with a child row for each marker."""
-        item = QTreeWidgetItem([f"{result.title} ({_plural(len(result.sequence.files), 'file')})"])
+    def _fill_session(item: QTreeWidgetItem, result: SessionResult) -> None:
+        """Show what reading a recording found: its state, and a row for each marker."""
+        item.takeChildren()
 
-        if result.error is not None:
+        if result.pending:
+            item.setText(1, "Reading…")
+        elif result.error is not None:
             item.setText(1, "Could not read")
             item.addChild(QTreeWidgetItem([result.error]))
         elif not result.markers:
@@ -255,7 +318,7 @@ class MainWindow(QMainWindow):
             for index, seconds in enumerate(result.markers, start=1):
                 item.addChild(QTreeWidgetItem([f"Marker {index:02d}", format_timestamp(seconds), f"{seconds:.2f}"]))
 
-        return item
+        item.setExpanded(True)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -30,7 +30,7 @@ prefix each command with `uv run`:
 
 ```bash
 uv sync --extra dev
-uv run pytest --cov   # 430 tests; fails under 100% coverage (plain pytest does not measure it)
+uv run pytest --cov   # 435 tests; fails under 100% coverage (plain pytest does not measure it)
 uv run pylint src tests tools
 uv run pyright
 ```
@@ -293,7 +293,11 @@ files in sorted depth-first order. The CLI still calls it without `recursive`
 and looks one level deep. `find_sessions` keys on the session id, so a
 recording found in two folders is listed once, under the first folder seen.
 The window walks on the UI thread (a wait cursor, no cancel), so a very large
-folder freezes it until the walk ends.
+folder freezes it until the walk ends. Only the walk blocks: it lists every
+recording at once as `pending` (`results.find_recordings`), then reads them one
+per event-loop turn (`read_session`, driven by a zero-interval `QTimer`), so
+rows show "Reading…" and fill in as markers turn up. Finished results are kept
+across additions and `Clear` stops the queue.
 
 Two routes put it on a desktop:
 
