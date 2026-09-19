@@ -66,6 +66,45 @@ The window only reads your files. It does not change them, and it does not
 change Insta360 Studio projects. To build the downloadable app yourself, run
 `tools/build-app.sh` on a Mac.
 
+### Updates
+
+The downloaded app checks for a newer version when it opens, and again every
+24 hours while it stays open. If there is one, it tells you and asks. Nothing
+installs until you click **Install and Restart**. **Not Now** asks again at
+the next check, and **Skip This Version** stays quiet until a later version
+comes out. **Help, Check for Updates** checks on request.
+
+The app keeps the version it replaced. **Help, Roll Back** returns to it, and
+rolling back again returns to the newer one. Only one earlier version is kept.
+
+Updates need the app to sit in a folder your account can change, such as
+Applications. If it cannot update itself, it says why. An app started with
+`uv` or the setup script does not update itself.
+
+**How updates are checked.** The app carries the certificate of a small
+release authority. Each release zip is signed with a release key, and ships
+with that key's certificate, which the authority signed. The app installs an
+update only if the certificate chains to the authority, is in date and is not
+revoked, and its key made the signature. This matters because a file the app
+downloads itself does not get macOS's first-launch warning, so these checks are
+the only ones the update gets. A revoked certificate is refused as soon as the
+app sees the new revocation list, without a new app. The checks do not remove
+the warning on your first launch. That needs an Apple developer certificate.
+
+To check a download by hand, save the zip, its `.sig` and `.crt` files and
+`release_ca.pem` from the release page, then run:
+
+```bash
+uv run --with cryptography python tools/verify_release.py \
+    Insta360-Markers-0.3.0-arm64.zip --authority release_ca.pem
+```
+
+It prints `valid` when the zip may be installed. `tools/pki/README.md`
+explains the authority, how certificates are issued and revoked, and what to do
+if a release key leaks. Releases also carry a build attestation that shows
+GitHub Actions built the zips from this repository. Check it with
+`gh attestation verify FILE --repo ReignBock/insta360py`.
+
 ## Install
 
 Grab a wheel from the [latest release](https://github.com/ReignBock/insta360py/releases/latest):
@@ -257,7 +296,7 @@ Pushing a `v*` tag by hand still works, and is checked against
 
 ```bash
 uv sync --extra dev
-uv run pytest --cov                  # 256 tests, 100% coverage (enforced)
+uv run pytest --cov                  # 430 tests, 100% coverage (enforced)
 uv run pylint src tests tools
 uv run pyright
 ```
