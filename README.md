@@ -57,7 +57,7 @@ commands described below.
 Drop your `.insv` or `.lrv` files, or a folder, on the window. You can also
 use **Add Files** and **Add Folder**. A folder is searched all the way down, so
 you can pick a whole memory card. The window shows each folder on the way to a
-recording, and leaves out folders with no footage. It skips hidden folders,
+recording, and leaves out folders with no footage. Recordings appear while the folders are still being searched, and each shows Reading until its markers are found. It skips hidden folders,
 such as the trash and Spotlight's index. Each recording lists its markers with
 the time in the video. **Copy** puts the list on the
 clipboard, and **Save** writes it to a text file.
@@ -296,7 +296,7 @@ Pushing a `v*` tag by hand still works, and is checked against
 
 ```bash
 uv sync --extra dev
-uv run pytest --cov                  # 430 tests, 100% coverage (enforced)
+uv run pytest --cov                  # 443 tests, 100% coverage (enforced)
 uv run pylint src tests tools
 uv run pyright
 ```

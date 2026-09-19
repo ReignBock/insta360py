@@ -13,6 +13,7 @@ from insvtools.metadata import read_metadata, replace_metadata
 from insvmarkers.extractor import (
     Sequence,
     expand_paths,
+    walk_paths,
     find_sessions,
     first_frame_timestamp,
     format_timestamp,
@@ -237,3 +238,16 @@ def test_a_recursive_search_still_takes_named_files_as_given(x5_insv: Path) -> N
 def test_a_recursive_search_lists_files_in_a_stable_order(nested_footage: Path) -> None:
     """The same folder gives the same list every time."""
     assert expand_paths([nested_footage], recursive=True) == expand_paths([nested_footage], recursive=True)
+
+
+def test_walking_yields_the_footage_of_one_folder_at_a_time(nested_footage: Path) -> None:
+    """Each folder with footage is one batch, in the same order as a full search."""
+    batches = list(walk_paths([nested_footage]))
+
+    assert [len(batch) for batch in batches] == [1, 1]
+    assert [video for batch in batches for video in batch] == expand_paths([nested_footage], recursive=True)
+
+
+def test_walking_a_file_yields_it_and_a_missing_path_is_skipped(x5_insv: Path, tmp_path: Path) -> None:
+    """A file is its own batch; something that does not exist is skipped."""
+    assert list(walk_paths([x5_insv, tmp_path / "gone"])) == [[x5_insv]]

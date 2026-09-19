@@ -30,7 +30,7 @@ prefix each command with `uv run`:
 
 ```bash
 uv sync --extra dev
-uv run pytest --cov   # 430 tests; fails under 100% coverage (plain pytest does not measure it)
+uv run pytest --cov   # 443 tests; fails under 100% coverage (plain pytest does not measure it)
 uv run pylint src tests tools
 uv run pyright
 ```
@@ -292,8 +292,17 @@ trash, Spotlight's index and the `._` copies a Mac drive keeps), and lists
 files in sorted depth-first order. The CLI still calls it without `recursive`
 and looks one level deep. `find_sessions` keys on the session id, so a
 recording found in two folders is listed once, under the first folder seen.
-The window walks on the UI thread (a wait cursor, no cancel), so a very large
-folder freezes it until the walk ends.
+The window walks off the UI thread. `_Walker` (a `QThread` over
+`extractor.walk_paths`, which yields the footage of one folder at a time)
+reports each folder as it goes, tagged with a token so a walk that a newer one
+replaced is ignored. Each recording found is listed at once as `pending`
+(`results.find_recordings`), then read one per event-loop turn (`read_session`,
+driven by a zero-interval `QTimer`), so rows show "Reading..." and fill in as
+markers turn up, and the search and the reading overlap. Redraws are debounced
+to one per 100 ms. Finished results are kept across additions; `Clear` and a
+new add stop the old walk (`requestInterruption`), and `closeEvent` waits for
+threads. coverage.py does not trace Qt's threads, so `_Walker.run` and
+`walk_paths` are tested by calling them directly.
 
 Two routes put it on a desktop:
 
