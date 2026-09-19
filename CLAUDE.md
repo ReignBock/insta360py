@@ -23,16 +23,23 @@ regenerate golden outputs that are already committed.
 
 ## Working here
 
+`flake.nix` + `.envrc` (`use flake`) provide Python 3.13, uv, ffmpeg and
+nodejs (pyright's PyPI wrapper needs a node it can find). `direnv allow` runs
+`uv sync --extra dev` and activates the project environment. Without Nix,
+prefix each command with `uv run`:
+
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest          # 216 tests; fails under 100% coverage
-.venv/bin/pylint src tests tools
-.venv/bin/pyright
+uv sync --extra dev
+uv run pytest --cov   # 216 tests; fails under 100% coverage (plain pytest does not measure it)
+uv run pylint src tests tools
+uv run pyright
 ```
+
+Run a single test or file with `uv run pytest tests/test_mp4_writer.py::test_name`.
 
 Three gates, all currently clean, all expected to stay that way:
 
-- **pytest at 100% coverage**, enforced by `fail_under = 100`. New code arrives
+- **pytest at 100% coverage**, enforced by `fail_under = 100` when run with `--cov` (CI does). New code arrives
   with its tests. Four lines carry `# pragma: no cover`, each with a comment
   saying why (three need a >4 GiB payload to reach; one is a convergence
   guard).
@@ -42,14 +49,14 @@ Three gates, all currently clean, all expected to stay that way:
   does no type inference, and pyright found both a real `Optional` misuse in
   `cut.py` and the unsound `find_frame` signature.
 
-`python3` on PATH is an unrelated Ansible venv — always use `.venv/bin/*`.
+Outside the direnv shell, `python3` on PATH is an unrelated Ansible venv, so use `uv run`.
 `ffmpeg` is available (used only by tests); there is no `exiftool`, no Java
 and no Maven.
 
 ### Packaging
 
 ```bash
-.venv/bin/python -m build        # pure-Python wheel + sdist, no compile step
+uv build                        # pure-Python wheel + sdist, no compile step
 ```
 
 `protobuf` is the only runtime dependency and the shipped code spawns no

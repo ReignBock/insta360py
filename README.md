@@ -34,20 +34,24 @@ Grab a wheel from the [latest release](https://github.com/ReignBock/insta360py/r
 pip install insta360py-0.1.0-py3-none-any.whl
 ```
 
-Or install straight from a tag:
+Or run straight from a tag, with nothing installed. `uvx` builds the tag in a
+cached environment and runs the command:
 
 ```bash
-pip install "git+https://github.com/ReignBock/insta360py@v0.1.0"
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.1.0" insvtools --version
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.1.0" insv-markers --help
 ```
+
+To keep both commands on your PATH, use `uv tool install` with the same
+`git+` URL.
 
 Or from a checkout:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install .
+uv tool install .
 ```
 
-Any of these gives you two commands, `insvtools` and `insv-markers`.
+Each of these provides two commands, `insvtools` and `insv-markers`.
 
 This is not on PyPI.
 
@@ -134,8 +138,7 @@ files it produces cannot be read by the original Java tool at all.
 ## Building a package
 
 ```bash
-.venv/bin/pip install build
-.venv/bin/python -m build          # -> dist/*.whl and dist/*.tar.gz
+uv build               # -> dist/*.whl and dist/*.tar.gz
 ```
 
 That is the whole story: a pure-Python wheel, no compile step, no platform
@@ -165,10 +168,10 @@ Pushing a `v*` tag by hand still works, and is checked against
 ## Development
 
 ```bash
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/pytest                      # 216 tests, 100% coverage (enforced)
-.venv/bin/pylint src tests tools
-.venv/bin/pyright
+uv sync --extra dev
+uv run pytest --cov                  # 216 tests, 100% coverage (enforced)
+uv run pylint src tests tools
+uv run pyright
 ```
 
 Fidelity is checked against reference output from the original Java tool,
