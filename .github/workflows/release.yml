@@ -65,6 +65,12 @@ jobs:
         continue-on-error: true
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
+      # Required: the window's tests import Qt, and an import that fails
+      # stops test collection outright instead of skipping. Keep in step with
+      # the same step in ci.yml.
+      - name: Install Qt's runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+
       - run: pip install -e '.[dev]' build twine
 
       # Never ship something the suite has not passed.

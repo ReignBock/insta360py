@@ -58,15 +58,15 @@ launcher in `~/Applications` without downloading the zip, run
 Grab a wheel from the [latest release](https://github.com/ReignBock/insta360py/releases/latest):
 
 ```bash
-pip install insta360py-0.2.0-py3-none-any.whl
+pip install insta360py-0.2.1-py3-none-any.whl
 ```
 
 Or run straight from a tag, with nothing installed. `uvx` builds the tag in a
 cached environment and runs the command:
 
 ```bash
-uvx --from "git+https://github.com/ReignBock/insta360py@v0.2.0" insvtools --version
-uvx --from "git+https://github.com/ReignBock/insta360py@v0.2.0" insv-markers --help
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.2.1" insvtools --version
+uvx --from "git+https://github.com/ReignBock/insta360py@v0.2.1" insv-markers --help
 ```
 
 To keep both commands on your PATH, use `uv tool install` with the same
@@ -101,7 +101,7 @@ Straight from GitHub, with no checkout:
 uvx --from "insta360py[gui] @ git+https://github.com/ReignBock/insta360py@main" insv-markers-gui
 ```
 
-Replace `main` with a release tag to pin a version. The window ships in 0.2.0
+Replace `main` with a release tag to pin a version. The window ships in 0.2.1
 and later, so `v0.1.0` does not have it.
 
 To keep the command on your PATH, install it once and run it by name:

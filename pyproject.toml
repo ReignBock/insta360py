@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "insta360py"
-version = "0.2.0"
+version = "0.2.1"
 description = "Read, cut and extract markers from Insta360 .insv/.lrv footage"
 readme = "README.md"
 # SPDX expression per PEP 639; the TOML-table form is deprecated. The vendored
