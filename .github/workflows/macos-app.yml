@@ -1,0 +1,79 @@
+name: macOS app
+
+# Builds the standalone Insta360 Markers app and, when given a release tag,
+# attaches the zips to that release. release.yml calls this after it
+# publishes: a release made with GITHUB_TOKEN does not start other workflows
+# by itself, so a `release: published` trigger would never fire.
+#
+# Run by hand from the Actions tab to try a build. Leave the tag empty and the
+# zips stay on the run as artifacts.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to attach the apps to
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the apps to. Empty builds without attaching."
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  app:
+    name: Build for ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # An empty ref means the ref that started the run.
+          ref: ${{ inputs.tag }}
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build the app
+        run: tools/build-app.sh
+
+      # A build that produces a bundle which cannot start is worse than a
+      # failed build. Qt's offscreen platform needs no display, so the runner
+      # can prove the frozen app launches and stays up.
+      - name: Check the app starts
+        run: |
+          APP="dist-app/Insta360 Markers.app/Contents/MacOS/Insta360 Markers"
+          QT_QPA_PLATFORM=offscreen "$APP" tests/resources/x5_indexed.insv &
+          PID=$!
+          sleep 5
+          if ! kill -0 "$PID" 2>/dev/null; then
+            wait "$PID" || true
+            echo "::error::the app exited within 5 seconds"
+            exit 1
+          fi
+          kill "$PID"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Insta360-Markers-${{ matrix.arch }}
+          path: dist-app/*.zip
+
+      - name: Attach to the release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag }}" dist-app/*.zip --clobber

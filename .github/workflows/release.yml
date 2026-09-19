@@ -18,6 +18,8 @@ jobs:
   release:
     name: Build and publish the release
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - uses: actions/checkout@v7
@@ -111,3 +113,10 @@ jobs:
           gh release view "$TAG" > /dev/null 2>&1 \
             || gh release create "$TAG" --title "$TAG" --generate-notes
           gh release upload "$TAG" dist/* --clobber
+
+  app:
+    name: Build the macOS apps
+    needs: release
+    uses: ./.github/workflows/macos-app.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}

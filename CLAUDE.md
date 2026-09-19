@@ -30,7 +30,7 @@ prefix each command with `uv run`:
 
 ```bash
 uv sync --extra dev
-uv run pytest --cov   # 216 tests; fails under 100% coverage (plain pytest does not measure it)
+uv run pytest --cov   # 237 tests; fails under 100% coverage (plain pytest does not measure it)
 uv run pylint src tests tools
 uv run pyright
 ```
@@ -256,8 +256,11 @@ ANCHORS, which the factory deliberately does not map to a class.
 
 ### `insvmarkers`
 
-`extractor.py` (sessions and markers, cross-platform) and `studio.py` (the
-`.insprj` keyframe injection). Locating Studio's project is Windows-only, but
+`extractor.py` (sessions and markers, cross-platform), `results.py` (scans files
+into `SessionResult`s and renders the text report; shared by the CLI and the
+window, and free of Qt and printing), `studio.py` (the `.insprj` keyframe
+injection) and `gui.py` (the PySide6 window). Keep decisions about *what to
+show* in `results.py`; `gui.py` only arranges it on screen. Locating Studio's project is Windows-only, but
 everything that edits the JSON is plain data handling and is tested off
 Windows — keep that split.
 
@@ -268,6 +271,30 @@ list. New keyframes take their framing from the user's *existing* keyframes —
 interpolated between them, clamped to the nearest one outside them — and never
 from each other. The project is backed up to `.insprj.bak` first, and Studio
 must be closed or it will write its in-memory copy back over the changes.
+
+### The Mac app
+
+`gui.py` is behind the `gui` extra (`PySide6-Essentials`), which `dev` also
+includes so the window is tested and counted toward coverage. Its tests run on
+Qt's offscreen platform (`tests/test_gui.py` sets `QT_QPA_PLATFORM` itself;
+do not export it in the shell, or the real window goes offscreen too). It
+reads files and never injects into Studio: injection is unverified.
+
+Two routes put it on a desktop:
+
+- **`tools/build-app.sh`** freezes it with PyInstaller (`tools/app.spec`,
+  `tools/app_entry.py`) into a standalone `.app` and zips it with `ditto`.
+  It must run on a Mac, once per architecture. `.github/workflows/macos-app.yml`
+  does that for arm64 and x86_64 and is called from `release.yml` after the
+  release exists (a `GITHUB_TOKEN` release does not trigger other workflows,
+  so a `release: published` trigger would never fire). The app is ad-hoc
+  signed only, so a downloaded copy needs Open Anyway on first launch.
+- **`tools/setup-mac.sh`** installs the tool with the extra and writes a small
+  launcher `.app` into `~/Applications` that `exec`s `insv-markers-gui` by
+  absolute path (Finder gives apps a bare PATH).
+
+On NixOS the pip Qt wheels need system libraries; `flake.nix` puts them on
+`LD_LIBRARY_PATH` for Linux only.
 
 ## CLI surfaces
 
@@ -321,6 +348,14 @@ future must be scrubbed the same way.
 
 ## Known gaps
 
+- **The window has never been seen on a real display.** It is tested
+  headless, and the frozen app and the launcher were shown to start under the
+  offscreen platform on a Mac over SSH. `open` fails over SSH (no graphical
+  session), so drag and drop, layout and the first-launch Gatekeeper flow need
+  someone at a Mac. The Actions runner labels `macos-15` and `macos-15-intel`
+  and the Qt libraries apt-installed in `ci.yml` are also unproven until the
+  first run.
+- **Studio injection has failed for the user on a Mac** and is uninvestigated.
 - **Insta360 Studio acceptance is unverified.** Nothing here can confirm
   Studio opens a cut file or accepts an injected project; that needs Windows
   with Studio installed.

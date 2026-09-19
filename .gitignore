@@ -217,3 +217,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 .direnv
+
+dist-app/
+build-app/
+
+# The app build spec is source, not a PyInstaller by-product.
+!tools/app.spec
