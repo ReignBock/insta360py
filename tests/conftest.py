@@ -1,6 +1,5 @@
 """Shared fixtures: a scratch copy of the sample file and the golden outputs."""
 
-import importlib.util
 import shutil
 from pathlib import Path
 
@@ -8,22 +7,6 @@ import pytest
 
 RESOURCES = Path(__file__).parent / "resources"
 GOLDEN = Path(__file__).parent / "golden"
-
-# The update tests need the `cryptography` package, which the gui and dev extras
-# bring in. A plain install, like the unpacked sdist the packaging job tests, has
-# neither, and importing it would stop collection instead of skipping. The CI
-# test jobs install the dev extra, so these run there.
-collect_ignore: list[str] = []
-if importlib.util.find_spec("cryptography") is None:
-    collect_ignore += [
-        "pki_kit.py",
-        "test_gui.py",
-        "test_pki_scripts.py",
-        "test_release_tools.py",
-        "test_trust.py",
-        "test_update.py",
-        "test_updater.py",
-    ]
 
 
 @pytest.fixture
